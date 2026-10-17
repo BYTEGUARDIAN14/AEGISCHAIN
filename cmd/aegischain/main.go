@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/byteaegis/aegischain/internal/ledger"
 	"github.com/byteaegis/aegischain/internal/policy"
 	"github.com/byteaegis/aegischain/internal/resolver"
 	"github.com/byteaegis/aegischain/internal/verify"
@@ -291,19 +292,56 @@ func newPolicyCmd() *cobra.Command {
 }
 
 func newLedgerCmd() *cobra.Command {
+	var ledgerPath string
+
 	cmd := &cobra.Command{
 		Use:   "ledger",
 		Short: "Inspect and verify the append-only decision ledger",
 	}
-	cmd.AddCommand(&cobra.Command{
-		Use:   "verify",
+
+	verifyCmd := &cobra.Command{
+		Use:   "verify [file]",
 		Short: "Cryptographically verify hash chain integrity from genesis root",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cmd.Println("Verifying decision ledger hash chain...")
-			cmd.Println("[PASS] Hash chain integrity valid across all entries. Zero tampering detected.")
+			path := ledgerPath
+			if len(args) > 0 {
+				path = args[0]
+			}
+			cmd.Printf("=================================================================\n")
+			cmd.Printf("  AEGISCHAIN DECISION LEDGER INTEGRITY VERIFICATION\n")
+			cmd.Printf("=================================================================\n")
+			cmd.Printf("Target Ledger File: %s\n\n", path)
+
+			l, err := ledger.LoadFromFile(path)
+			if err != nil {
+				return fmt.Errorf("failed to load ledger file %s: %w", path, err)
+			}
+
+			entries := l.Entries()
+			cmd.Printf("Total Ledger Entries: %d\n", len(entries))
+			if len(entries) == 0 {
+				cmd.Println("[WARN] Ledger contains 0 entries. Empty ledger is valid at genesis.")
+				return nil
+			}
+
+			if err := l.Verify(); err != nil {
+				cmd.Printf("\n[FAIL] CRYPTOGRAPHIC TAMPERING DETECTED IN DECISION LEDGER:\n")
+				cmd.Printf("  Violation: %v\n", err)
+				return fmt.Errorf("ledger integrity verification failed: %w", err)
+			}
+
+			cp := l.CreateCheckpoint()
+			cmd.Println("[PASS] Hash chain continuity verified from Genesis root (00000000...).")
+			cmd.Printf("Chain Head Index:    %d\n", cp.Index)
+			cmd.Printf("Chain Head Hash:     %s\n", cp.HeadHash)
+			cmd.Printf("Checkpoint Time:     %s\n", cp.Timestamp)
+			cmd.Printf("=================================================================\n")
 			return nil
 		},
-	})
+	}
+	verifyCmd.Flags().StringVarP(&ledgerPath, "file", "f", "bench/results/ledger.jsonl", "Path to decision ledger file")
+
+	cmd.AddCommand(verifyCmd)
 	return cmd
 }
 

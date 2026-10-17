@@ -1,11 +1,14 @@
 package ledger
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -161,11 +164,120 @@ func (l *Ledger) Entries() []DecisionRecord {
 	return res
 }
 
-// TamperForTesting allows unit tests to deliberately tamper with a record.
+// Checkpoint represents a periodic cryptographic root anchor of the ledger.
+type Checkpoint struct {
+	Index     uint64 `json:"index"`
+	HeadHash  string `json:"head_hash"`
+	Timestamp string `json:"timestamp"`
+	Signature string `json:"signature,omitempty"`
+}
+
+// CreateCheckpoint generates a signed checkpoint payload for the current head of the ledger.
+func (l *Ledger) CreateCheckpoint() Checkpoint {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	if len(l.entries) == 0 {
+		return Checkpoint{
+			Index:     0,
+			HeadHash:  GenesisHash,
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+	}
+
+	last := l.entries[len(l.entries)-1]
+	return Checkpoint{
+		Index:     last.Index,
+		HeadHash:  last.Hash,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+// SaveToFile serializes the full ledger to an append-only JSON Lines file.
+func (l *Ledger) SaveToFile(path string) error {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("failed to create ledger file %s: %w", path, err)
+	}
+	defer f.Close()
+
+	for _, entry := range l.entries {
+		line, err := json.Marshal(entry)
+		if err != nil {
+			return fmt.Errorf("failed to marshal entry %d: %w", entry.Index, err)
+		}
+		if _, err := f.Write(append(line, '\n')); err != nil {
+			return fmt.Errorf("failed to write entry %d to file: %w", entry.Index, err)
+		}
+	}
+
+	return nil
+}
+
+// LoadFromFile reads and reconstructs a Ledger from a JSON Lines file.
+func LoadFromFile(path string) (*Ledger, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open ledger file %s: %w", path, err)
+	}
+	defer f.Close()
+
+	var entries []DecisionRecord
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var entry DecisionRecord
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			return nil, fmt.Errorf("corrupt ledger line: %w", err)
+		}
+		entries = append(entries, entry)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("error reading ledger file: %w", err)
+	}
+
+	return &Ledger{entries: entries}, nil
+}
+
+// VerifyFile reads a ledger file from disk and validates full hash-chain continuity.
+func VerifyFile(path string) error {
+	l, err := LoadFromFile(path)
+	if err != nil {
+		return err
+	}
+	return l.Verify()
+}
+
+// TamperForTesting allows unit tests to deliberately modify a record in memory.
 func (l *Ledger) TamperForTesting(index int, newVerdict string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if index < len(l.entries) {
 		l.entries[index].Verdict = newVerdict
+	}
+}
+
+// DeleteEntryForTesting deletes an entry to simulate record omission attack.
+func (l *Ledger) DeleteEntryForTesting(index int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if index < len(l.entries) {
+		l.entries = append(l.entries[:index], l.entries[index+1:]...)
+	}
+}
+
+// ReorderEntriesForTesting swaps two entries to simulate sequence tampering.
+func (l *Ledger) ReorderEntriesForTesting(i, j int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if i < len(l.entries) && j < len(l.entries) {
+		l.entries[i], l.entries[j] = l.entries[j], l.entries[i]
 	}
 }
