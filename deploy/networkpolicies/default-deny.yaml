@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: aegischain-system
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-admission-webhook-ingress
+  namespace: aegischain-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: aegischain-admission-webhook
+  ingress:
+    - from: []
+      ports:
+        - protocol: TCP
+          port: 8443
+  policyTypes:
+    - Ingress

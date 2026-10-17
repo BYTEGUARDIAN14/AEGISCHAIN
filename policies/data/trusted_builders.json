@@ -1,0 +1,16 @@
+{
+  "trusted_builders": [
+    {
+      "id": "https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@refs/tags/v2.0.0",
+      "name": "SLSA Container Generator L3",
+      "slsa_level": 3
+    }
+  ],
+  "trusted_issuers": [
+    "https://token.actions.githubusercontent.com"
+  ],
+  "allowed_organizations": [
+    "BYTEGUARDIAN14",
+    "byteaegis"
+  ]
+}

@@ -1,0 +1,17 @@
+# Binaries and build artifacts
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+coverage.out
+
+# IDE and temporary files
+.idea/
+.vscode/
+*.swp
+*.tmp
+.DS_Store
+
+# Test caches and bench output
+bench/results/*.tmp

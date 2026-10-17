@@ -1,0 +1,14 @@
+{
+  "exemptions": [
+    {
+      "id": "EX-2026-BASELINE",
+      "owner": "security@byteaegis.in",
+      "reason": "Baseline platform exemption template with non-expired timestamp",
+      "expires_at": "2027-12-31T23:59:59Z",
+      "scope": {
+        "namespace": "staging",
+        "image": "ghcr.io/byteaegis/sample-app:*"
+      }
+    }
+  ]
+}
