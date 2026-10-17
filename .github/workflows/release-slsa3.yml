@@ -1,0 +1,85 @@
+name: AegisChain SLSA Build Level 3 Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  build:
+    name: Build Reproducible Release Binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      hashes: ${{ steps.hash.outputs.hashes }}
+    steps:
+      - name: Hardened Runner Egress Control
+        uses: step-security/harden-runner@4d991eb9b905ef189e4c376166672c3f2f230481 # v2.11.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout Source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
+        with:
+          go-version: '1.23.2'
+          check-latest: true
+
+      - name: Compile Reproducible Binaries
+        run: |
+          mkdir -p dist
+          # Strip symbol table, debug information and path prefixes for bit-for-bit reproducibility
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -buildid=" -o dist/aegischain-linux-amd64 ./cmd/aegischain
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w -buildid=" -o dist/aegischain-linux-arm64 ./cmd/aegischain
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -buildid=" -o dist/aegischain-windows-amd64.exe ./cmd/aegischain
+
+      - name: Generate CycloneDX and SPDX SBOMs via Syft
+        uses: anchore/sbom-action@f325610c9f50a54015d37c8d16cb3b0e2c8f4de0 # v0.18.0
+        with:
+          path: ./dist
+          format: cyclonedx-json
+          output-file: dist/aegischain-cyclonedx.json
+
+      - name: Generate SHA256 Hashes for SLSA Provenance
+        id: hash
+        run: |
+          cd dist
+          sha256sum * > ../checksums.txt
+          echo "hashes=$(sha256sum * | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
+
+      - name: Sign Release Binaries with Keyless Identity
+        run: |
+          cd dist
+          for f in aegischain-*; do
+            cosign sign-blob --yes --bundle "${f}.bundle" "$f"
+          done
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: release-binaries
+          path: dist/
+
+  # Generate SLSA Build Level 3 Provenance using the official SLSA generic generator
+  provenance:
+    needs: [build]
+    permissions:
+      id-token: write
+      contents: write
+      actions: read
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.0.0
+    with:
+      base64-subjects: "${{ needs.build.outputs.hashes }}"
+      upload-assets: true

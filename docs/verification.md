@@ -1,71 +1,144 @@
-# Verifying AegisChain Releases
+# AegisChain Release Verification Guide
 
-Every official release of AegisChain (binaries, Helm charts, and container images) is cryptographically signed using Sigstore keyless signing and accompanied by SLSA Build Level 3 provenance and CycloneDX SBOMs.
+This guide provides copy-paste verification commands allowing any operator, platform security engineer, or auditor to cryptographically verify the authenticity, SLSA Build Level 3 provenance, and software bill of materials (SBOM) of official AegisChain releases.
 
-Anyone can independently verify release authenticity and integrity using the copy-paste instructions below.
+---
 
-## 1. Verifying Container Images with Cosign
+## 1. Trust Anchors
 
-Verify the container image signature against Sigstore Fulcio and Rekor with the exact expected workflow identity:
+Official release artifacts are signed using Sigstore keyless workflow identity anchored to GitHub Actions OIDC:
+
+| Attribute | Expected Value |
+|---|---|
+| **OIDC Issuer** | `https://token.actions.githubusercontent.com` |
+| **Certificate Identity** | `https://github.com/BYTEGUARDIAN14/aegischain/.github/workflows/release-slsa3.yml@refs/tags/v*` |
+| **SLSA Builder ID** | `https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@refs/tags/v2.0.0` |
+| **Source Repository** | `https://github.com/BYTEGUARDIAN14/aegischain` |
+
+---
+
+## 2. Verifying Release Binaries
+
+### Step 2.1: Download Release Artifacts
+Download the binary, cryptographic bundle, and provenance attestation from GitHub Releases:
 
 ```bash
-# Set release tag and expected identity
-export IMAGE="ghcr.io/byteaegis/aegischain:v1.0.0"
-export EXPECTED_IDENTITY="https://github.com/BYTEGUARDIAN14/aegischain/.github/workflows/release.yml@refs/tags/v1.0.0"
-export EXPECTED_ISSUER="https://token.actions.githubusercontent.com"
+VERSION="v1.0.0"
+curl -sLO "https://github.com/BYTEGUARDIAN14/aegischain/releases/download/${VERSION}/aegischain-linux-amd64"
+curl -sLO "https://github.com/BYTEGUARDIAN14/aegischain/releases/download/${VERSION}/aegischain-linux-amd64.bundle"
+curl -sLO "https://github.com/BYTEGUARDIAN14/aegischain/releases/download/${VERSION}/attestation.intoto.jsonl"
+```
 
-# Verify cryptographic signature
+### Step 2.2: Verify Cryptographic Signature with Cosign
+Verify the binary using Cosign with strict identity enforcement:
+
+```bash
+cosign verify-blob \
+  --bundle "aegischain-linux-amd64.bundle" \
+  --certificate-identity-regexp "^https://github.com/BYTEGUARDIAN14/aegischain/.github/workflows/.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  aegischain-linux-amd64
+```
+
+Expected output:
+```text
+Verified OK
+Certificate subject: https://github.com/BYTEGUARDIAN14/aegischain/.github/workflows/release-slsa3.yml@refs/tags/v1.0.0
+Certificate issuer: https://token.actions.githubusercontent.com
+```
+
+### Step 2.3: Verify SLSA Build Level 3 Provenance
+Verify that the binary was built by the isolated SLSA generator from the exact tagged commit:
+
+```bash
+slsa-verifier verify-artifact \
+  --provenance-path "attestation.intoto.jsonl" \
+  --source-uri "github.com/BYTEGUARDIAN14/aegischain" \
+  --source-tag "${VERSION}" \
+  --builder-id "https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@refs/tags/v2.0.0" \
+  aegischain-linux-amd64
+```
+
+Expected output:
+```text
+PASSED: Verified SLSA provenance
+  Source: github.com/BYTEGUARDIAN14/aegischain
+  Tag: v1.0.0
+  Builder: https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@refs/tags/v2.0.0
+```
+
+---
+
+## 3. Verifying Container Images
+
+### Step 3.1: Verify Image Signature
+Verify the admission webhook and trust engine container images published to Docker Hub (`mohamed1410/aegischain-*`):
+
+```bash
+IMAGE="mohamed1410/aegischain-admission-webhook@sha256:52242b9363649daf33fecab71ff1a41988547a97a966b5b127ca91c186d3023b"
+
 cosign verify \
-  --certificate-identity "${EXPECTED_IDENTITY}" \
-  --certificate-oidc-issuer "${EXPECTED_ISSUER}" \
+  --certificate-identity-regexp "^https://github.com/BYTEGUARDIAN14/aegischain/.github/workflows/.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   "${IMAGE}"
 ```
 
-## 2. Verifying SLSA Build Level 3 Provenance
+### Step 3.2: Verify In-Toto Attestations
 
-Verify that the artifact was built by the official GitHub Actions SLSA generator from the authentic source repository:
-
+#### Verify SLSA Provenance Attestation
 ```bash
-# Verify SLSA Build L3 provenance attestation
 cosign verify-attestation \
-  --type https://slsa.dev/provenance/v1 \
-  --certificate-identity "${EXPECTED_IDENTITY}" \
-  --certificate-oidc-issuer "${EXPECTED_ISSUER}" \
-  "${IMAGE}" | jq -r '.payload' | base64 -d | jq .
+  --type "https://slsa.dev/provenance/v1" \
+  --certificate-identity-regexp "^https://github.com/BYTEGUARDIAN14/aegischain/.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  "${IMAGE}"
 ```
 
-Alternatively, use `slsa-verifier`:
+#### Verify CycloneDX Software Bill of Materials (SBOM)
 ```bash
-slsa-verifier verify-image "${IMAGE}" \
-  --source-uri "github.com/BYTEGUARDIAN14/aegischain" \
-  --source-tag "v1.0.0"
-```
-
-## 3. Verifying the Software Bill of Materials (SBOM)
-
-Verify the CycloneDX SBOM attestation:
-
-```bash
-# Verify CycloneDX SBOM attestation
 cosign verify-attestation \
-  --type https://cyclonedx.org/schema \
-  --certificate-identity "${EXPECTED_IDENTITY}" \
-  --certificate-oidc-issuer "${EXPECTED_ISSUER}" \
-  "${IMAGE}" | jq -r '.payload' | base64 -d | jq .predicate
+  --type "https://cyclonedx.org/schema" \
+  --certificate-identity-regexp "^https://github.com/BYTEGUARDIAN14/aegischain/.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  "${IMAGE}"
 ```
 
-## 4. Verifying Release Binaries
+#### Verify Vulnerability Scan and OpenVEX
+```bash
+cosign verify-attestation \
+  --type "https://openvex.dev/ns/v0.2.0" \
+  --certificate-identity-regexp "^https://github.com/BYTEGUARDIAN14/aegischain/.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  "${IMAGE}"
+```
 
-For standalone CLI binaries downloaded from GitHub Releases:
+---
+
+## 4. Air-Gapped Key-Based Verification (Secondary Mode)
+
+For air-gapped environments disconnected from public Rekor and Fulcio, AegisChain release assets can be verified using the platform's public key:
 
 ```bash
-# Verify binary checksum with signed SHA256SUMS
-sha256sum --check SHA256SUMS
-
-# Verify the SHA256SUMS file signature
 cosign verify-blob \
-  --certificate-identity "${EXPECTED_IDENTITY}" \
-  --certificate-oidc-issuer "${EXPECTED_ISSUER}" \
-  --bundle SHA256SUMS.sigstore.json \
-  SHA256SUMS
+  --key deploy/keys/cosign.pub \
+  --signature aegischain-linux-amd64.sig \
+  aegischain-linux-amd64
+```
+
+---
+
+## 5. Verifying Decision Ledger Cryptographic Integrity
+
+To independently audit the append-only decision ledger in a cluster or offline backup:
+
+```bash
+aegischain ledger verify --ledger /var/log/aegischain/ledger.jsonl
+```
+
+Expected output:
+```text
+Cryptographic hash chain validated successfully across N decision records.
+Genesis Hash: 0000000000000000000000000000000000000000000000000000000000000000
+Merkle Head Hash: a89f...
+Integrity: PASS (Zero modifications or deletions detected)
 ```
