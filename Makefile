@@ -51,8 +51,7 @@ attack-lab: ## Execute end-to-end Attack Lab scenario matrix
 
 .PHONY: bench
 bench: ## Run automated performance and admission latency benchmarks
-	@go test -v -bench=. -benchmem ./internal/... > bench/results/engine-bench.txt || true
-	@powershell -ExecutionPolicy Bypass -File bench/run-benchmarks.ps1 || true
+	@go run ./bench/runner/main.go
 
 .PHONY: demo
 demo: ## Run end-to-end 3-minute flagship trust platform demonstration

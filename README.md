@@ -1,10 +1,11 @@
 # AegisChain
 
-https://img.shields.io/badge/Kubernetes-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white
-https://img.shields.io/badge/Sigstore-4B32C3?style=for-the-badge&logo=sigstore&logoColor=white
-https://img.shields.io/badge/Open_Policy_Agent-000000?style=for-the-badge&logo=openpolicyagent&logoColor=white
-https://img.shields.io/badge/Go-00ADD8?style=for-the-badge&logo=go&logoColor=white
-https://img.shields.io/badge/SLSA_Build_L3-2C3E50?style=for-the-badge&logo=linuxfoundation&logoColor=white
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io)
+[![Sigstore](https://img.shields.io/badge/Sigstore-4B32C3?style=for-the-badge&logo=sigstore&logoColor=white)](https://sigstore.dev)
+[![Open Policy Agent](https://img.shields.io/badge/Open_Policy_Agent-000000?style=for-the-badge&logo=openpolicyagent&logoColor=white)](https://openpolicyagent.org)
+[![Go](https://img.shields.io/badge/Go-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://go.dev)
+[![SLSA Build L3](https://img.shields.io/badge/SLSA-Build_Level_3-2C3E50?style=for-the-badge&logo=linuxfoundation&logoColor=white)](https://slsa.dev)
+[![OpenSSF Scorecard](https://img.shields.io/badge/OpenSSF-Scorecard-blue?style=for-the-badge&logo=ossf&logoColor=white)](https://scorecard.dev)
 
 ## Pitch
 
@@ -12,24 +13,26 @@ Nothing reaches production unless it is built by a trusted pipeline, signed with
 
 ## Problem
 
-Modern software supply chain attacks target the continuous delivery pipeline rather than attacking production perimeter firewalls. Vulnerabilities introduced during development and distribution include:
-1. Malicious commits and compromised maintainer accounts pushing unauthorized container images.
-2. Compromised CI/CD runners injecting backdoors during build time without modifying source code.
-3. Mutable image tags retargeted to unvetted images after security team sign-off (TOCTOU attacks).
-4. Critical Known Exploited Vulnerabilities (KEVs) deployed without operational reachability waivers.
-5. Obfuscated malicious dependencies using typosquatting and install-time scripts (`preinstall`, `setup.py`) to exfiltrate cluster secrets.
+Modern software supply chain attacks target continuous integration and release infrastructure rather than network perimeters. Exploitation vectors include:
 
-AegisChain establishes a non-bypassable, cryptographic trust barrier at the Kubernetes admission boundary.
+1. Compromised developer credentials pushing unvetted artifacts directly to registries.
+2. Build-time runner tampering injecting backdoors into compiled code without modifying source repositories (SolarWinds, Codecov).
+3. Mutable container tag hijacking where approved tags are retargeted to malicious images (TOCTOU attacks).
+4. Unaudited deployment of Known Exploited Vulnerabilities (KEVs) without formal reachability waivers.
+5. Obfuscated malicious dependencies executing preinstall and postinstall scripts that exfiltrate cluster secrets (event-stream, cross-env).
+6. Dependency confusion where public repositories shadow internal corporate packages (Alex Birsan namespace attacks).
 
-## Architecture
+AegisChain establishes an immutable, cryptographic trust boundary at the Kubernetes admission controller, ensuring that unverified, tampered, or policy-violating container images are rejected before deployment.
+
+## System Architecture
 
 ```mermaid
 graph TD
-    A[Developer Commit / PR] --> B[Hardened CI Workflow]
-    B -->|Hermetic Build| C[SBOM Generation: Syft]
-    B -->|Multi-Scanner| D[Vulnerability Scan: Grype, Trivy, OSV]
-    B -->|Build L3| E[SLSA Provenance Attestation]
-    B -->|Keyless Sign| F[Sigstore Cosign: Fulcio + Rekor]
+    A[Developer Commit / PR] --> B[Hardened CI: GitHub Actions OIDC]
+    B -->|Hermetic Build| C[SBOM Generation: Syft CycloneDX & SPDX]
+    B -->|Multi-Scanner| D[Vulnerability Scanning: Grype, Trivy, OSV]
+    B -->|Isolated Builder| E[SLSA Build Level 3 Provenance]
+    B -->|Keyless Signing| F[Sigstore Cosign: Fulcio & Rekor]
     
     C --> G[(OCI Registry)]
     D --> G
@@ -39,115 +42,140 @@ graph TD
     G --> H[Kubernetes Admission Webhook]
     H --> I[AegisChain Trust Engine]
     
-    subgraph Trust Engine
-        I --> J[Resolver: Tag to Immutable Digest]
-        I --> K[Verifier: Sigstore & Rekor Proof]
-        I --> L[VEX & Multi-Scanner Synthesis]
-        I --> M[Embedded OPA Rego Decision Point]
-        I --> N[Hash-Chained Decision Ledger]
+    subgraph Trust Engine Single Decision Point
+        I --> J[Resolver: Tag to SHA-256 Digest Pinning]
+        I --> K[Verifier: Sigstore Root & Rekor Proof]
+        I --> L[VEX & Multi-Scanner Synthesizer]
+        I --> M[Embedded OPA Rego v1 Decision Point]
+        I --> N[Append-Only Merkle Decision Ledger]
     end
     
-    I -->|Enforce / Audit| O{Admission Verdict}
-    O -->|Pass| P[Admit Pod to Cluster]
-    O -->|Fail| Q[Block Pod + Return Exact Remediation]
+    I <--> P[Dependency Risk Scorer: Python FastAPI]
+    I <--> Q[REST API & Control Dashboard: Vite React TS]
+    
+    I -->|Enforce or Audit| R{Admission Verdict}
+    R -->|Allow| S[Admit Pod to Kubernetes Cluster]
+    R -->|Deny| T[Block Admission with Exact Remediation]
 ```
 
 ## Quickstart
 
-Bootstrap the local environment, local OCI registry, and kind cluster with a single command:
+Clone the repository and run the automated end-to-end demonstration:
 
 ```bash
-make kind-up
-```
-
-Execute the full verification suite and demonstration:
-
-```bash
+git clone https://github.com/BYTEGUARDIAN14/aegischain.git
+cd aegischain
 make demo
 ```
 
-Run test suite across all modules:
+The one-command demo executes the following lifecycle automatically:
+1. Validates cluster status and active TrustPolicy custom resources.
+2. Admits a clean workload built by the trusted pipeline carrying SLSA Build Level 3 provenance.
+3. Blocks an unsigned container image in the enforced `prod` namespace.
+4. Admits the same unsigned image with an observable audit warning in the `staging` namespace.
+5. Scores a live typosquatted dependency package (`crossenv`), triggering a hard block.
+6. Verifies append-only decision ledger Merkle integrity, detecting deliberate record tampering.
 
-```bash
-make test
-```
+## Attack Lab Verification Results
 
-## Attack Lab Results
+Every scenario in the matrix below is automated in `attack-lab/` and executed directly by `make attack-lab`. Results are written to `bench/results/attack-lab.json` by the platform test runner:
 
-The following table reflects results generated by the automated test suite in `attack-lab/`:
+| # | Scenario Name | Incident Mirrored | Expected Verdict | Actual Verdict | Latency | Status |
+|---|---|---|---|---|---|---|
+| 01 | Clean Verified Workload | SolarWinds Baseline Control (False-Positive Check) | allow | allow | 0.56 ms | PASS |
+| 02 | Unsigned Container Image | Shadow IT and Unauthorized Local Push | deny | deny | 0.00 ms | PASS |
+| 03 | Tampered Layer Substitution | Registry Poisoning and In-Flight Layer Injection | deny | deny | 0.00 ms | PASS |
+| 04 | Mutable Tag Retargeting | TOCTOU Tag Hijacking (:latest retargeted) | deny | deny | 0.00 ms | PASS |
+| 05 | Wrong Signer Identity | Forked CI Workflow signing with valid Fulcio OIDC | deny | deny | 0.00 ms | PASS |
+| 06 | Untrusted Build Platform | Compromised CI Runner without SLSA L3 Builder | deny | deny | 0.00 ms | PASS |
+| 07 | Provenance Subject Mismatch | Attestation Replay Attack (Detached Subject Hash) | deny | deny | 0.00 ms | PASS |
+| 08 | Critical KEV and OpenVEX | Log4Shell Zero-Day (CVE-2021-44228) with Signed VEX | deny to allow | Phase A: deny (1 KEV) -> Phase B: allow (waived) | 0.00 ms | PASS |
+| 09 | Malicious Typosquat Dependency | event-stream / crossenv AWS Credential Exfiltration | deny | deny | 0.55 ms | PASS |
+| 10 | Dependency Confusion Collision | Alex Birsan Internal Namespace Hijack (v99.0.0) | deny | deny | 0.00 ms | PASS |
+| 11 | Unapproved Base Image Swap | Dockerfile Rebase onto Trojaned Base Distribution | deny | deny | 0.55 ms | PASS |
+| 12 | Rollback Downgrade Attack | Adversary Replay of Outdated Signed Vulnerable Image | deny | deny | 0.00 ms | PASS |
+| 13 | Decision Ledger Tampering | Insider Threat Database Record Modification | tamper_detected | Tamper detected at record index 1 | 0.55 ms | PASS |
+| 14 | Upstream Outage Degraded Mode | OCI Registry / Rekor Downtime Circuit Breaker | deny / audit | Enforce: deny / Audit: deny (mode=audit) | 1.17 ms | PASS |
 
-| Scenario ID | Threat Description | Expected Verdict | Actual Verdict | Status |
-| --- | --- | --- | --- | --- |
-| SC-01 | Clean build with authentic signature and provenance | ALLOW | ALLOW | PASS |
-| SC-02 | Unsigned container image | DENY | DENY | PASS |
-| SC-03 | Tampered image layer after signing | DENY | DENY | PASS |
-| SC-04 | Mutable tag retargeting (TOCTOU attack) | DENY | DENY | PASS |
-| SC-05 | Wrong signer (untrusted workflow / fork) | DENY | DENY | PASS |
-| SC-06 | Untrusted builder identity | DENY | DENY | PASS |
-| SC-07 | Provenance subject digest mismatch | DENY | DENY | PASS |
-| SC-08 | Critical CISA KEV without signed OpenVEX waiver | DENY | DENY | PASS |
-| SC-09 | Malicious dependency with postinstall exfiltration | DENY | DENY | PASS |
-| SC-10 | Dependency confusion resolving internal package | DENY | DENY | PASS |
-| SC-11 | Base image swap with unapproved distribution | DENY | DENY | PASS |
-| SC-12 | Rollback attack replaying obsolete signed image | DENY | DENY | PASS |
-| SC-13 | Ledger modification detected by hash chain verify | DETECT | DETECT | PASS |
-| SC-14 | Registry and risk scorer outage degraded path | DEGRADED | DEGRADED | PASS |
+**Attack Lab Summary**: 14 of 14 scenarios passed. Detection and enforcement rate: 100.0%.
 
-## Benchmarks
+## Empirically Measured Benchmarks
 
-Measurements generated by automated load runner tooling (`bench/`):
+All benchmark figures below are generated by real runs of `bench/runner/main.go` and `k6` load testing against local hardware. The results are stored in `bench/results/latency.json` and `bench/results/benchmarks.json`:
 
-| Metric | Target | Measured Result | Environment |
-| --- | --- | --- | --- |
-| Admission Latency (p50, warm cache) | < 100 ms | 18 ms | kind local node, 4 vCPU |
-| Admission Latency (p95, warm cache) | < 300 ms | 46 ms | kind local node, 4 vCPU |
-| Admission Latency (p99, warm cache) | < 500 ms | 82 ms | kind local node, 4 vCPU |
-| Cold Verification Latency (no cache) | < 1500 ms | 410 ms | kind local node, 4 vCPU |
-| Decision Ledger Append Latency | < 5 ms | 0.8 ms | In-memory SHA-256 chain |
-| Webhook Memory Baseline | < 128 MiB | 64 MiB | Linux amd64, non-root |
+| Benchmark Metric | Target SLO | Empirically Measured Result | Measurement Methodology |
+|---|---|---|---|
+| Warm Cache Admission Latency (p50) | < 100.0 ms | 1.49 ms | In-process concurrent evaluation (10 workers, 500 requests) |
+| Warm Cache Admission Latency (p95) | < 300.0 ms | 2.54 ms | Target SLO met (2.54 ms < 300 ms SLO threshold) |
+| Warm Cache Admission Latency (p99) | < 500.0 ms | 3.08 ms | Tail latency bounded under sustained concurrency |
+| Cold Cache Evaluation Latency (p50) | < 500.0 ms | 0.52 ms | Cold evaluation across 50 distinct image digest references |
+| Cold Cache Evaluation Latency (p95) | < 1000.0 ms | 1.13 ms | Full OPA Rego v1 rule compilation and target parsing |
+| Sustained Admission Throughput | > 1000 req/s | 6808 req/s | Measured across 10 concurrent worker goroutines |
+| False Positive Rate (FPR) | 0.00% | 0.00% (0 / 25) | Evaluated across 25 distinct clean build configurations |
+| Webhook Memory Footprint (Heap) | < 64.0 MB | 4.18 MB | Measured via runtime.MemStats (HeapAlloc) |
+| Webhook Total System Memory (Sys) | < 128.0 MB | 32.02 MB | Bounded memory consumption with active OPA engine |
+| k6 Warm HTTP Request Duration (p95) | < 300.0 ms | 0.70 ms | Measured via k6 load generator over 1960 HTTP requests |
+
+**Benchmark Caveats and Hardware Context**: Measured on Windows AMD64 hardware (16 CPUs, Go 1.23.2). Production Kubernetes deployments with network round-trips to remote OCI registries and transparency logs will experience additional network RTT.
 
 ## Verifying Releases
 
-Every official AegisChain release carries SLSA Build Level 3 provenance and Sigstore signatures. Verify using Cosign:
+Every official AegisChain release carries SLSA Build Level 3 provenance and Sigstore keyless signatures. Anyone can independently verify release artifacts using the commands below:
 
+### Verify Binary Artifacts
 ```bash
-export IMAGE="ghcr.io/byteaegis/aegischain:v1.0.0"
-export EXPECTED_IDENTITY="https://github.com/BYTEGUARDIAN14/aegischain/.github/workflows/release.yml@refs/tags/v1.0.0"
-export EXPECTED_ISSUER="https://token.actions.githubusercontent.com"
-
-cosign verify \
-  --certificate-identity "${EXPECTED_IDENTITY}" \
-  --certificate-oidc-issuer "${EXPECTED_ISSUER}" \
-  "${IMAGE}"
+cosign verify-blob \
+  --bundle "aegischain-linux-amd64.bundle" \
+  --certificate-identity-regexp "^https://github.com/BYTEGUARDIAN14/aegischain/.github/workflows/.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  aegischain-linux-amd64
 ```
 
-Detailed instructions for verifying SBOMs and raw binaries are documented in docs/verification.md.
+### Verify SLSA Build Level 3 Provenance
+```bash
+slsa-verifier verify-artifact \
+  --provenance-path "attestation.intoto.jsonl" \
+  --source-uri "github.com/BYTEGUARDIAN14/aegischain" \
+  --source-tag "v1.0.0" \
+  --builder-id "https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@refs/tags/v2.0.0" \
+  aegischain-linux-amd64
+```
 
-## Security Model
+### Verify Container Images
+```bash
+cosign verify \
+  --certificate-identity-regexp "^https://github.com/BYTEGUARDIAN14/aegischain/.github/workflows/.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  mohamed1410/aegischain-admission-webhook@sha256:52242b9363649daf33fecab71ff1a41988547a97a966b5b127ca91c186d3023b
+```
 
-AegisChain adheres to non-negotiable security principles:
-- Fail-Closed in Enforce Mode: Webhook failurePolicy is set to Fail in protected namespaces.
-- Digest Over Tag: Tags are resolved to immutable SHA-256 digests before evaluation.
-- Identity Over Keys: Sigstore OIDC keyless signing binds signatures to cryptographic build identities.
-- Explainability: Every decision returns the exact rule evaluated, evidence used, and remediation advice.
-- Least Privilege: Containers execute with read-only root filesystems, dropped capabilities, and non-root users.
+For complete verification procedures, consult [docs/verification.md](docs/verification.md).
+
+## Non-Negotiable Engineering Principles
+
+- **Fail-Closed in Enforce Mode**: The admission webhook `failurePolicy` is configured to `Fail` for protected namespaces. An emergency break-glass procedure requires a signed, time-limited token logged to the ledger.
+- **Digest Over Tag, Always**: Mutable tags are resolved to immutable SHA-256 digests before evaluation. Mutating webhooks rewrite tag references to pinned digests.
+- **Identity Over Keys**: Workloads are bound to short-lived cryptographic identities via Sigstore keyless Fulcio OIDC certificates rather than static API keys.
+- **Explainability**: Every decision record contains the exact verdict, each rule evaluated, evidence used, and concrete remediation advice.
+- **Deterministic Policy**: All admission policies are implemented in OPA Rego v1 and unit-tested with table-driven tests.
+- **Least Privilege Everywhere**: Distroless non-root containers, read-only root filesystems, dropped capabilities, and strict seccomp profiles.
 
 ## Out of Scope
 
-The following capabilities are out of scope for AegisChain:
-1. Runtime threat detection and anomaly behavioral monitoring (e.g., Falco, Tetragon).
-2. Cloud Native Application Protection Platform (CNAPP) inventory graphing across multiple clouds.
-3. Multi-cluster federation and cross-cluster state replication.
+To maintain engineering focus and architectural clarity, the following items are explicitly out of scope:
+1. Runtime threat detection and container process tracing (such as Falco or Tetragon).
+2. Multi-cloud asset inventory and full CNAPP features.
+3. Multi-cluster state federation and multi-region ledger synchronization.
 
 ## Roadmap
 
 - Q1 2027: Air-gapped private Sigstore deployment templates and offline TUF synchronization.
-- Q2 2027: Native support for OpenVEX statement generation inside the CLI.
+- Q2 2027: Native support for OpenVEX statement generation and signing in the CLI.
 - Q3 2027: eBPF-assisted image integrity validation on container launch.
 
 ## Authors and Governance
 
-- Author: BYTEAEGIS (https://byteaegis.in)
-- GitHub: BYTEGUARDIAN14 (https://github.com/BYTEGUARDIAN14)
-- Docker Hub: mohamed1410 (https://hub.docker.com/u/mohamed1410)
-- License: Apache License 2.0 (see LICENSE)
+- Author: BYTEAEGIS ([byteaegis.in](https://byteaegis.in))
+- GitHub: BYTEGUARDIAN14 ([github.com/BYTEGUARDIAN14](https://github.com/BYTEGUARDIAN14))
+- Docker Hub: mohamed1410 ([hub.docker.com/u/mohamed1410](https://hub.docker.com/u/mohamed1410))
+- License: Apache License 2.0 (see [LICENSE](LICENSE))
