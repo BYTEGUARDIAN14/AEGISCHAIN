@@ -36,6 +36,10 @@ build: ## Build all binaries (CLI, trust-engine, admission-webhook)
 kind-up: ## Bootstrap local registry and kind cluster
 	powershell -ExecutionPolicy Bypass -File deploy/kind/kind-up.ps1
 
+.PHONY: sample-pipeline
+sample-pipeline: ## Run secure build, sign, and attestation pipeline on sample app
+	powershell -ExecutionPolicy Bypass -File scripts/build-and-attest-sample.ps1
+
 .PHONY: kind-down
 kind-down: ## Tear down kind cluster and local registry
 	kind delete cluster --name $(KIND_CLUSTER_NAME)

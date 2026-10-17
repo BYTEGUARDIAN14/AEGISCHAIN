@@ -1,0 +1,24 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://byteaegis.in/vex/sample-app-sha256:52242b9363649daf33fecab71ff1a41988547a97a966b5b127ca91c186d3023b",
+  "author": "security@byteaegis.in",
+  "role": "Software Supplier",
+  "timestamp": "2026-10-17T08:27:40Z",
+  "version": 1,
+  "tooling": "AegisChain Trust Platform 1.0.0",
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-99999"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/sample-app@sha256:52242b9363649daf33fecab71ff1a41988547a97a966b5b127ca91c186d3023b"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Symbol not invoked from main application binary verified by govulncheck."
+    }
+  ]
+}

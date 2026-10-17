@@ -1,0 +1,112 @@
+name: Reusable Hardened Supply Chain Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      image_name:
+        required: true
+        type: string
+        description: Target container image repository (e.g. ghcr.io/org/repo)
+      dockerfile:
+        required: false
+        type: string
+        default: Dockerfile
+        description: Path to Dockerfile
+      context:
+        required: false
+        type: string
+        default: .
+        description: Build context path
+    outputs:
+      image_digest:
+        description: Cryptographically resolved SHA-256 digest of the built artifact
+        value: ${{ jobs.build-and-sign.outputs.image_digest }}
+
+permissions: {}
+
+jobs:
+  build-and-sign:
+    name: Hermetic Build, Scan, Attest, and Sign
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # Required strictly for Fulcio OIDC keyless signing
+    outputs:
+      image_digest: ${{ steps.build.outputs.image_digest }}
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@91182c01eb212526b6cb4b51a5b748055a71600c # v2.10.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout Source Code
+        uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@f325610c9f50a54015d37c8d16cb3b0e2c8f4de0 # v0.17.3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push Image (No Cache on Release)
+        id: build
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          push: true
+          tags: ${{ inputs.image_name }}:${{ github.sha }}
+          no-cache: true
+
+      - name: Extract Image Digest
+        id: digest
+        run: |
+          DIGEST="${{ steps.build.outputs.digest }}"
+          echo "image_digest=${DIGEST}" >> $GITHUB_OUTPUT
+          echo "Built artifact digest: ${DIGEST}"
+
+      - name: Generate CycloneDX and SPDX SBOMs via Syft
+        run: |
+          IMAGE_URI="${{ inputs.image_name }}@${{ steps.digest.outputs.image_digest }}"
+          syft "${IMAGE_URI}" -o cyclonedx-json=cyclonedx.json -o spdx-json=spdx.json
+
+      - name: Run Vulnerability Scan via Trivy
+        uses: aquasecurity/trivy-action@6e7b7f1fb3e46a7816d368d4465e40643c2733b0 # 0.24.0
+        with:
+          image-ref: "${{ inputs.image_name }}@${{ steps.digest.outputs.image_digest }}"
+          format: 'json'
+          output: 'trivy-report.json'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+      - name: Keyless Sign Container Image via Cosign
+        run: |
+          cosign sign --yes "${{ inputs.image_name }}@${{ steps.digest.outputs.image_digest }}"
+
+      - name: Keyless Attest CycloneDX SBOM
+        run: |
+          cosign attest --yes \
+            --predicate cyclonedx.json \
+            --type https://cyclonedx.org/schema \
+            "${{ inputs.image_name }}@${{ steps.digest.outputs.image_digest }}"
+
+      - name: Keyless Attest Vulnerability Scan
+        run: |
+          cosign attest --yes \
+            --predicate trivy-report.json \
+            --type https://cosign.sigstore.dev/attestation/vuln/v1 \
+            "${{ inputs.image_name }}@${{ steps.digest.outputs.image_digest }}"

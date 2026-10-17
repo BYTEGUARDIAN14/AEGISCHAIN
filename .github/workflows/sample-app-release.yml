@@ -1,0 +1,23 @@
+name: Sample App Secure Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'sample-app/**'
+
+permissions: {}
+
+jobs:
+  release:
+    name: Build, Sign, and Attest Sample App
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    uses: ./.github/workflows/reusable-secure-pipeline.yml
+    with:
+      image_name: ghcr.io/byteaegis/sample-app
+      dockerfile: sample-app/Dockerfile
+      context: sample-app

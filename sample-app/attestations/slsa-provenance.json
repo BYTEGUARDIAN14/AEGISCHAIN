@@ -1,0 +1,43 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "pkg:oci/sample-app",
+      "digest": {
+        "sha256": "52242b9363649daf33fecab71ff1a41988547a97a966b5b127ca91c186d3023b"
+      }
+    }
+  ],
+  "predicateType": "https://slsa.dev/provenance/v1",
+  "predicate": {
+    "buildDefinition": {
+      "buildType": "https://actions.github.com/buildtypes/workflow/v1",
+      "externalParameters": {
+        "workflow": {
+          "ref": "refs/heads/main",
+          "repository": "https://github.com/BYTEGUARDIAN14/aegischain",
+          "path": ".github/workflows/reusable-secure-pipeline.yml"
+        }
+      },
+      "internalParameters": {
+        "cgo_enabled": "0"
+      },
+      "resolvedDependencies": [
+        {
+          "uri": "gcr.io/distroless/static:nonroot",
+          "digest": {
+            "sha256": "e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3"
+          }
+        }
+      ]
+    },
+    "runDetails": {
+      "builder": {
+        "id": "https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@refs/tags/v2.0.0"
+      },
+      "metadata": {
+        "invocationId": "https://github.com/BYTEGUARDIAN14/aegischain/actions/runs/10892834"
+      }
+    }
+  }
+}
