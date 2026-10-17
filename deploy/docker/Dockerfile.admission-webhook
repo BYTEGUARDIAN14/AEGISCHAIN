@@ -1,0 +1,25 @@
+# Hardened distroless container for AegisChain Admission Controller
+FROM gcr.io/distroless/static:nonroot
+
+USER 65532:65532
+WORKDIR /app
+
+# Copy static binaries
+COPY --chown=65532:65532 bin/admission-webhook-linux /app/admission-webhook
+COPY --chown=65532:65532 bin/cosign-linux-amd64 /usr/local/bin/cosign
+
+# Copy policies and public keys
+COPY --chown=65532:65532 policies/ /app/policies/
+COPY --chown=65532:65532 deploy/keys/ /app/deploy/keys/
+
+EXPOSE 8443
+
+ENTRYPOINT ["/app/admission-webhook"]
+CMD [ \
+  "--port=8443", \
+  "--tls-cert-file=/app/certs/tls.crt", \
+  "--tls-key-file=/app/certs/tls.key", \
+  "--policies-dir=/app/policies", \
+  "--data-dir=/app/policies/data", \
+  "--public-key=/app/deploy/keys/cosign.pub" \
+]

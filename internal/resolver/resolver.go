@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -24,18 +25,50 @@ type CacheEntry struct {
 }
 
 type Resolver struct {
-	mu          sync.RWMutex
-	cache       map[string]CacheEntry
-	revocations map[string]struct{}
-	ttl         time.Duration
+	mu           sync.RWMutex
+	cache        map[string]CacheEntry
+	revocations  map[string]struct{}
+	hostMappings map[string]string
+	ttl          time.Duration
 }
 
 func NewResolver(ttl time.Duration) *Resolver {
-	return &Resolver{
-		cache:       make(map[string]CacheEntry),
-		revocations: make(map[string]struct{}),
-		ttl:         ttl,
+	r := &Resolver{
+		cache:        make(map[string]CacheEntry),
+		revocations:  make(map[string]struct{}),
+		hostMappings: make(map[string]string),
+		ttl:          ttl,
 	}
+
+	if envMap := os.Getenv("AEGISCHAIN_REGISTRY_MAP"); envMap != "" {
+		for _, pair := range strings.Split(envMap, ",") {
+			parts := strings.Split(pair, "=")
+			if len(parts) == 2 {
+				r.hostMappings[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+			}
+		}
+	}
+
+	return r
+}
+
+// AddHostMapping configures in-memory host translation (e.g. localhost:5001 -> aegis-registry:5000).
+func (r *Resolver) AddHostMapping(from, to string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.hostMappings[from] = to
+}
+
+// MapImageRef returns the network-accessible image reference based on configured mappings.
+func (r *Resolver) MapImageRef(imageRef string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for from, to := range r.hostMappings {
+		if strings.HasPrefix(imageRef, from) {
+			return strings.Replace(imageRef, from, to, 1)
+		}
+	}
+	return imageRef
 }
 
 // RevokeDigest immediately invalidates any cache and flags the digest as untrusted.
@@ -58,9 +91,12 @@ func (r *Resolver) Resolve(ctx context.Context, imageRef string) (string, error)
 		return "", ErrInvalidReference
 	}
 
+	// Apply host mapping if present
+	targetRef := r.MapImageRef(imageRef)
+
 	// Check if already an immutable digest reference
-	if strings.Contains(imageRef, "@sha256:") {
-		parts := strings.Split(imageRef, "@")
+	if strings.Contains(targetRef, "@sha256:") {
+		parts := strings.Split(targetRef, "@")
 		digest := parts[1]
 		r.mu.RLock()
 		if _, revoked := r.revocations[digest]; revoked {
@@ -85,8 +121,13 @@ func (r *Resolver) Resolve(ctx context.Context, imageRef string) (string, error)
 	}
 	r.mu.RUnlock()
 
+	var opts []name.Option
+	if strings.HasPrefix(targetRef, "localhost:") || strings.HasPrefix(targetRef, "127.0.0.1:") || strings.Contains(targetRef, "aegis-registry:") || strings.Contains(targetRef, ":5000") || strings.Contains(targetRef, ":5001") {
+		opts = append(opts, name.Insecure)
+	}
+
 	// Parse reference with go-containerregistry
-	ref, err := name.ParseReference(imageRef)
+	ref, err := name.ParseReference(targetRef, opts...)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrInvalidReference, err)
 	}

@@ -15,3 +15,6 @@ coverage.out
 
 # Test caches and bench output
 bench/results/*.tmp
+
+# Private keys
+deploy/certs/*.key
