@@ -56,7 +56,7 @@ func main() {
 	}
 
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
-	if err := os.WriteFile(certFile, certPEM, 0644); err != nil {
+	if err := os.WriteFile(certFile, certPEM, 0600); err != nil {
 		panic(err)
 	}
 
