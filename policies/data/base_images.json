@@ -1,0 +1,11 @@
+{
+  "allowed_digests": [
+    "sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3",
+    "sha256:6ec5aa99dc33c56d5b79dc1a68b6a14704a4fa8b9152b84d08891ad85ec2d1da",
+    "sha256:9dd2625a1ff2859b8d8b01d8f7822c0f528942fe56cfe7a1e7c38d3b8d72d679"
+  ],
+  "allowed_registries": [
+    "gcr.io/distroless",
+    "cgr.dev/chainguard"
+  ]
+}

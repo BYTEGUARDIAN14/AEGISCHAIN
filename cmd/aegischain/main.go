@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/byteaegis/aegischain/internal/policy"
 	"github.com/byteaegis/aegischain/internal/resolver"
 	"github.com/byteaegis/aegischain/internal/verify"
 )
@@ -226,19 +228,65 @@ func newScoreCmd() *cobra.Command {
 }
 
 func newPolicyCmd() *cobra.Command {
+	var policyDir string
+	var dataDir string
+
 	cmd := &cobra.Command{
 		Use:   "policy",
 		Short: "Manage and test OPA Rego policies and exemptions",
 	}
-	cmd.AddCommand(&cobra.Command{
+
+	testCmd := &cobra.Command{
 		Use:   "test",
 		Short: "Run OPA unit tests and verify exemption expirations",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cmd.Println("Running OPA Rego policy test suite...")
-			cmd.Println("All 8 core policies passed. Zero expired exemptions.")
+			cmd.Printf("=================================================================\n")
+			cmd.Printf("  AEGISCHAIN OPA POLICY SUITE & EXEMPTION VALIDATION\n")
+			cmd.Printf("=================================================================\n")
+
+			// 1. Run OPA unit tests
+			cmd.Println("[1/2] Executing OPA Rego unit tests...")
+			opaCmd := exec.Command("opa", "test",
+				filepath.Join(policyDir, "rego"),
+				filepath.Join(policyDir, "rego_test"),
+				dataDir,
+				"-v", "--coverage",
+			)
+			opaOut, err := opaCmd.CombinedOutput()
+			if err != nil {
+				cmd.Printf("OPA Test Output:\n%s\n", string(opaOut))
+				return fmt.Errorf("opa test suite failed: %w", err)
+			}
+			cmd.Println("[PASS] All OPA Rego unit tests passed successfully.")
+
+			// 2. Validate exemptions expiry
+			cmd.Println("[2/2] Verifying policy exemptions in data repository...")
+			allExemptions, expired, err := policy.VerifyExemptionsDirectory(dataDir, time.Now().UTC())
+			if err != nil {
+				return fmt.Errorf("failed to verify exemptions in %s: %w", dataDir, err)
+			}
+
+			cmd.Printf("Found %d registered platform exemptions across %s\n", len(allExemptions), dataDir)
+			if len(expired) > 0 {
+				cmd.Printf("\n[FAIL] %d EXPIRED EXEMPTION(S) DETECTED - FAILING CI GATE:\n", len(expired))
+				for _, exp := range expired {
+					cmd.Printf("  - Exemption ID: %s\n", exp.ID)
+					cmd.Printf("    Owner:        %s\n", exp.Owner)
+					cmd.Printf("    Expired At:   %s\n", exp.ExpiresAt.Format(time.RFC3339))
+					cmd.Printf("    Reason:       %s\n", exp.Reason)
+				}
+				return fmt.Errorf("policy exemption gate failed: %d expired exemptions found", len(expired))
+			}
+
+			cmd.Println("[PASS] Zero expired exemptions found. All waivers are active.")
+			cmd.Printf("=================================================================\n")
 			return nil
 		},
-	})
+	}
+	testCmd.Flags().StringVar(&policyDir, "policies", "policies", "Path to policies directory")
+	testCmd.Flags().StringVar(&dataDir, "data", "policies/data", "Path to policy data directory")
+
+	cmd.AddCommand(testCmd)
 	return cmd
 }
 
