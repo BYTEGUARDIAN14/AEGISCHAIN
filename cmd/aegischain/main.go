@@ -247,9 +247,8 @@ print(res.model_dump_json())
 				out, pyErr := pyCmd.CombinedOutput()
 				if pyErr == nil {
 					var pyScore risk.PackageScore
-					if err := json.Unmarshal(out, &pyScore); err == nil {
+					if uErr := json.Unmarshal(out, &pyScore); uErr == nil {
 						score = &pyScore
-						err = nil
 					}
 				}
 			}

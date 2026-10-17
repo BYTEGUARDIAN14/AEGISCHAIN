@@ -19,3 +19,4 @@ linters-settings:
     excludes:
       - G104 # Audit errors not checked (handled by errcheck)
       - G304 # File path provided as taint input in CLI/testing
+      - G204 # Subprocess launched with variable arguments in CLI/webhook

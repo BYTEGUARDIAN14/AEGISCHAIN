@@ -655,7 +655,7 @@ func main() {
 	}
 
 	outPath := filepath.Join("bench", "results", "attack-lab.json")
-	if err := os.WriteFile(outPath, reportBytes, 0644); err != nil {
+	if err := os.WriteFile(outPath, reportBytes, 0600); err != nil {
 		fmt.Printf("Failed to write %s: %v\n", outPath, err)
 		os.Exit(1)
 	}

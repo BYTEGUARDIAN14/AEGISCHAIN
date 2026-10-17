@@ -173,7 +173,7 @@ func TestVerifyExemptionsDirectory(t *testing.T) {
 			}
 		]
 	}`
-	err := os.WriteFile(filepath.Join(tempDir, "exemptions.json"), []byte(validContent), 0644)
+	err := os.WriteFile(filepath.Join(tempDir, "exemptions.json"), []byte(validContent), 0600)
 	require.NoError(t, err)
 
 	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
@@ -193,7 +193,7 @@ func TestVerifyExemptionsDirectory(t *testing.T) {
 			}
 		]
 	}`
-	err = os.WriteFile(filepath.Join(tempDir, "expired.json"), []byte(expiredContent), 0644)
+	err = os.WriteFile(filepath.Join(tempDir, "expired.json"), []byte(expiredContent), 0600)
 	require.NoError(t, err)
 
 	all, expired, err = VerifyExemptionsDirectory(tempDir, now)

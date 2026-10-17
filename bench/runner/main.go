@@ -355,7 +355,7 @@ func main() {
 		fmt.Printf("Failed to marshal latency report: %v\n", err)
 		os.Exit(1)
 	}
-	if err := os.WriteFile(filepath.Join("bench", "results", "latency.json"), latencyJson, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join("bench", "results", "latency.json"), latencyJson, 0600); err != nil {
 		fmt.Printf("Failed to write bench/results/latency.json: %v\n", err)
 		os.Exit(1)
 	}
@@ -367,7 +367,7 @@ func main() {
 		fmt.Printf("Failed to marshal benchmark report: %v\n", err)
 		os.Exit(1)
 	}
-	if err := os.WriteFile(filepath.Join("bench", "results", "benchmarks.json"), benchJson, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join("bench", "results", "benchmarks.json"), benchJson, 0600); err != nil {
 		fmt.Printf("Failed to write bench/results/benchmarks.json: %v\n", err)
 		os.Exit(1)
 	}

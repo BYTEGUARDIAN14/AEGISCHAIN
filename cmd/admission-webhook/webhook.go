@@ -17,7 +17,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -100,7 +99,6 @@ type AdmissionServer struct {
 	verifier     *verify.Verifier
 	policyEngine *policy.Engine
 	ledger       *ledger.Ledger
-	mu           sync.RWMutex
 }
 
 // NewAdmissionServer constructs and initializes the AdmissionServer.
@@ -533,7 +531,7 @@ func (s *AdmissionServer) evaluateContainer(ctx context.Context, imageRef, names
 							},
 						},
 					},
-					Predicate: json.RawMessage(fmt.Sprintf(`{"buildDefinition":{"externalParameters":{"workflow":{"repository":"https://github.com/BYTEGUARDIAN14/aegischain"}}},"runDetails":{"builder":{"id":"https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@refs/tags/v2.0.0"}}}`)),
+					Predicate: json.RawMessage(`{"buildDefinition":{"externalParameters":{"workflow":{"repository":"https://github.com/BYTEGUARDIAN14/aegischain"}}},"runDetails":{"builder":{"id":"https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@refs/tags/v2.0.0"}}}`),
 				}
 			}
 		}
