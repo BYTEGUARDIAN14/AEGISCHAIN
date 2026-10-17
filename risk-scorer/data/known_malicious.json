@@ -1,0 +1,46 @@
+{
+  "malicious_packages": [
+    {
+      "name": "crossenv",
+      "ecosystem": "npm",
+      "advisory": "MAL-2017-001",
+      "reason": "Typosquat of cross-env; exfiltrates environment variables to malicious external server in postinstall",
+      "source": "npm Security Advisory 474"
+    },
+    {
+      "name": "fallguys",
+      "ecosystem": "npm",
+      "advisory": "MAL-2020-002",
+      "reason": "Steals Discord tokens and browser credentials via postinstall script",
+      "source": "OSV"
+    },
+    {
+      "name": "color-picker-utility",
+      "ecosystem": "npm",
+      "advisory": "MAL-2026-9901",
+      "reason": "Suspicious base64 obfuscation and process spawning in preinstall",
+      "source": "AegisChain Attack Lab"
+    },
+    {
+      "name": "requsts",
+      "ecosystem": "pypi",
+      "advisory": "MAL-2017-003",
+      "reason": "Typosquat of requests; contains backdoor in setup.py",
+      "source": "PyPI Security Advisory"
+    },
+    {
+      "name": "urllib-secure",
+      "ecosystem": "pypi",
+      "advisory": "MAL-2026-9902",
+      "reason": "Fake security package exfiltrating AWS environment variables via HTTP GET",
+      "source": "AegisChain Attack Lab"
+    },
+    {
+      "name": "byteaegis-internal-auth",
+      "ecosystem": "npm",
+      "advisory": "CONFUSION-2026-001",
+      "reason": "Public namespace squatting on internal private package prefix (Dependency Confusion)",
+      "source": "AegisChain Attack Lab"
+    }
+  ]
+}

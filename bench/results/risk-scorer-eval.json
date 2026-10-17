@@ -1,0 +1,371 @@
+{
+  "timestamp": "2026-10-17T09:06:34Z",
+  "total_samples": 35,
+  "true_positives": 13,
+  "true_negatives": 22,
+  "false_positives": 0,
+  "false_negatives": 0,
+  "precision": 1.0,
+  "recall": 1.0,
+  "f1_score": 1.0,
+  "accuracy": 1.0,
+  "evaluation_duration_seconds": 0.0262,
+  "samples": [
+    {
+      "package": "crossenv",
+      "ecosystem": "npm",
+      "expected": "malicious",
+      "predicted": "malicious",
+      "score": 100,
+      "factors": [
+        "osv_malicious_advisory",
+        "separator_trick",
+        "postinstall_outbound_network_download",
+        "postinstall_credential_exfiltration_attempt"
+      ],
+      "correct": true
+    },
+    {
+      "package": "requsts",
+      "ecosystem": "pypi",
+      "expected": "malicious",
+      "predicted": "malicious",
+      "score": 100,
+      "factors": [
+        "osv_malicious_advisory",
+        "damerau_levenshtein_distance_1",
+        "setup_py_outbound_network_download",
+        "setup_py_python_process_execution"
+      ],
+      "correct": true
+    },
+    {
+      "package": "color-picker-utility",
+      "ecosystem": "npm",
+      "expected": "malicious",
+      "predicted": "malicious",
+      "score": 100,
+      "factors": [
+        "osv_malicious_advisory",
+        "preinstall_process_spawning",
+        "preinstall_base64_payload_execution"
+      ],
+      "correct": true
+    },
+    {
+      "package": "fallguys",
+      "ecosystem": "npm",
+      "expected": "malicious",
+      "predicted": "malicious",
+      "score": 100,
+      "factors": [
+        "osv_malicious_advisory"
+      ],
+      "correct": true
+    },
+    {
+      "package": "urllib-secure",
+      "ecosystem": "pypi",
+      "expected": "malicious",
+      "predicted": "malicious",
+      "score": 100,
+      "factors": [
+        "osv_malicious_advisory",
+        "setup_py_outbound_network_download",
+        "setup_py_credential_exfiltration_attempt",
+        "setup_py_network_import"
+      ],
+      "correct": true
+    },
+    {
+      "package": "byteaegis-internal-auth",
+      "ecosystem": "npm",
+      "expected": "malicious",
+      "predicted": "malicious",
+      "score": 100,
+      "factors": [
+        "osv_malicious_advisory",
+        "internal_naming_pattern",
+        "inflated_version_number"
+      ],
+      "correct": true
+    },
+    {
+      "package": "corp-payment-gateway",
+      "ecosystem": "npm",
+      "expected": "malicious",
+      "predicted": "malicious",
+      "score": 90,
+      "factors": [
+        "internal_naming_pattern",
+        "inflated_version_number"
+      ],
+      "correct": true
+    },
+    {
+      "package": "lod-ash",
+      "ecosystem": "npm",
+      "expected": "malicious",
+      "predicted": "malicious",
+      "score": 85,
+      "factors": [
+        "separator_trick"
+      ],
+      "correct": true
+    },
+    {
+      "package": "reactt",
+      "ecosystem": "npm",
+      "expected": "malicious",
+      "predicted": "malicious",
+      "score": 85,
+      "factors": [
+        "damerau_levenshtein_distance_1"
+      ],
+      "correct": true
+    },
+    {
+      "package": "chslk",
+      "ecosystem": "npm",
+      "expected": "malicious",
+      "predicted": "malicious",
+      "score": 85,
+      "factors": [
+        "damerau_levenshtein_distance_1"
+      ],
+      "correct": true
+    },
+    {
+      "package": "expresss",
+      "ecosystem": "npm",
+      "expected": "malicious",
+      "predicted": "malicious",
+      "score": 85,
+      "factors": [
+        "damerau_levenshtein_distance_1"
+      ],
+      "correct": true
+    },
+    {
+      "package": "botoo3",
+      "ecosystem": "pypi",
+      "expected": "malicious",
+      "predicted": "malicious",
+      "score": 85,
+      "factors": [
+        "damerau_levenshtein_distance_1"
+      ],
+      "correct": true
+    },
+    {
+      "package": "numpy-secure",
+      "ecosystem": "pypi",
+      "expected": "malicious",
+      "predicted": "malicious",
+      "score": 100,
+      "factors": [
+        "setup_py_reverse_shell_indicator",
+        "setup_py_python_process_execution"
+      ],
+      "correct": true
+    },
+    {
+      "package": "lodash",
+      "ecosystem": "npm",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "react",
+      "ecosystem": "npm",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "express",
+      "ecosystem": "npm",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "axios",
+      "ecosystem": "npm",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "chalk",
+      "ecosystem": "npm",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "commander",
+      "ecosystem": "npm",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "uuid",
+      "ecosystem": "npm",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "dotenv",
+      "ecosystem": "npm",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "requests",
+      "ecosystem": "pypi",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "urllib3",
+      "ecosystem": "pypi",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "boto3",
+      "ecosystem": "pypi",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "botocore",
+      "ecosystem": "pypi",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "numpy",
+      "ecosystem": "pypi",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "pandas",
+      "ecosystem": "pypi",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "pydantic",
+      "ecosystem": "pypi",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "fastapi",
+      "ecosystem": "pypi",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "pytest",
+      "ecosystem": "pypi",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "flask",
+      "ecosystem": "pypi",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "click",
+      "ecosystem": "pypi",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "golang.org/x/crypto",
+      "ecosystem": "go",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "github.com/spf13/cobra",
+      "ecosystem": "go",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    },
+    {
+      "package": "github.com/stretchr/testify",
+      "ecosystem": "go",
+      "expected": "clean",
+      "predicted": "clean",
+      "score": 0,
+      "factors": [],
+      "correct": true
+    }
+  ]
+}

