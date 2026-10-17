@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/byteaegis/aegischain/internal/api"
+	"github.com/byteaegis/aegischain/internal/ledger"
+	"github.com/byteaegis/aegischain/internal/risk"
 )
 
 func main() {
@@ -22,26 +25,35 @@ func main() {
 		port = "8081"
 	}
 
+	ledgerPath := os.Getenv("LEDGER_PATH")
+	if ledgerPath == "" {
+		ledgerPath = "bench/results/ledger.jsonl"
+	}
+
+	var decLedger *ledger.Ledger
+	l, err := ledger.LoadFromFile(ledgerPath)
+	if err == nil {
+		decLedger = l
+		slog.Info("Loaded decision ledger from disk", "path", ledgerPath, "entries", len(l.Entries()))
+	} else {
+		decLedger = ledger.NewLedger()
+		slog.Info("Initialized fresh decision ledger", "path", ledgerPath)
+	}
+
+	riskClient := risk.NewClient("http://localhost:8088", 2*time.Second)
+	apiServer := api.NewServer(decLedger, riskClient)
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintln(w, `{"status":"healthy","service":"trust-engine"}`)
-	})
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintln(w, `{"status":"ready","service":"trust-engine"}`)
-	})
+	apiServer.RegisterRoutes(mux)
 
 	srv := &http.Server{
 		Addr:         ":" + port,
 		Handler:      mux,
-		ReadTimeout:  5 * time.Second,
+		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
 
-	slog.Info("Starting AegisChain Trust Engine", "port", port)
+	slog.Info("Starting AegisChain Trust Engine REST API", "port", port)
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
