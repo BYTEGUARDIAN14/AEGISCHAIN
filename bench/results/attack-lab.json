@@ -1,0 +1,164 @@
+{
+  "timestamp": "2026-10-17T09:31:47Z",
+  "platform": "AegisChain Software Supply Chain Trust Platform",
+  "total_scenarios": 14,
+  "passed": 14,
+  "failed": 0,
+  "detection_rate_pct": 100,
+  "scenarios": [
+    {
+      "id": "01-clean-build",
+      "name": "Clean Verified Workload",
+      "incident_mirrored": "SolarWinds Baseline Control (False-Positive Check)",
+      "expected_verdict": "allow",
+      "actual_verdict": "allow",
+      "rule_evaluated": "all_rules",
+      "evidence": "SLSA L3 + Keyless Cosign + SBOM + Trivy Scan + Clean VEX",
+      "latency_ms": 0.56,
+      "status": "PASS"
+    },
+    {
+      "id": "02-unsigned-image",
+      "name": "Unsigned Container Image",
+      "incident_mirrored": "Shadow IT / Unauthorized Local Developer Push",
+      "expected_verdict": "deny",
+      "actual_verdict": "deny",
+      "rule_evaluated": "signature_required",
+      "evidence": "Artifact has zero valid cryptographic signatures",
+      "latency_ms": 0,
+      "status": "PASS"
+    },
+    {
+      "id": "03-tampered-layer",
+      "name": "Tampered Image Layer Substitution",
+      "incident_mirrored": "Registry Poisoning / In-Flight Man-in-the-Middle Injection",
+      "expected_verdict": "deny",
+      "actual_verdict": "deny",
+      "rule_evaluated": "signature_required",
+      "evidence": "Cryptographic signature envelope does not match modified layer hash",
+      "latency_ms": 0,
+      "status": "PASS"
+    },
+    {
+      "id": "04-tag-retargeting",
+      "name": "Mutable Tag Retargeting",
+      "incident_mirrored": "TOCTOU Tag Hijacking (:latest re-pointed to malicious digest)",
+      "expected_verdict": "deny",
+      "actual_verdict": "deny",
+      "rule_evaluated": "digest_pinning_required",
+      "evidence": "Resolved digest baadc0de... differs from signed attestation subjects",
+      "latency_ms": 0,
+      "status": "PASS"
+    },
+    {
+      "id": "05-wrong-signer",
+      "name": "Wrong Signer Workflow Identity",
+      "incident_mirrored": "Forked CI Workflow signing with valid Fulcio OIDC certificate",
+      "expected_verdict": "deny",
+      "actual_verdict": "deny",
+      "rule_evaluated": "signature_required",
+      "evidence": "Signer identity 'attacker-org/forked-repo' rejected by policy regex",
+      "latency_ms": 0,
+      "status": "PASS"
+    },
+    {
+      "id": "06-untrusted-builder",
+      "name": "Untrusted Build Runner",
+      "incident_mirrored": "Compromised Build Platform / Unhardened External Runner",
+      "expected_verdict": "deny",
+      "actual_verdict": "deny",
+      "rule_evaluated": "provenance_required",
+      "evidence": "Builder ID 'untrusted-selfhosted-runner' not on approved builder allowlist",
+      "latency_ms": 0,
+      "status": "PASS"
+    },
+    {
+      "id": "07-provenance-mismatch",
+      "name": "Provenance Subject Mismatch",
+      "incident_mirrored": "Attestation Replay Attack / Detached Provenance Substitution",
+      "expected_verdict": "deny",
+      "actual_verdict": "deny",
+      "rule_evaluated": "provenance_required",
+      "evidence": "Provenance subject 111111... does not match workload digest 52242b...",
+      "latency_ms": 0,
+      "status": "PASS"
+    },
+    {
+      "id": "08-critical-kev-vex",
+      "name": "Critical KEV \u0026 Signed OpenVEX Waiver",
+      "incident_mirrored": "Log4Shell Zero-Day (CVE-2021-44228) with Machine-Readable Waiver",
+      "expected_verdict": "Phase A: deny -\u003e Phase B: allow",
+      "actual_verdict": "Phase A: deny (1 KEV) -\u003e Phase B: allow (waived)",
+      "rule_evaluated": "vulnerability_gate",
+      "evidence": "Unwaived KEV halted; Signed VEX 'not_affected' waived finding cleanly",
+      "latency_ms": 0,
+      "status": "PASS"
+    },
+    {
+      "id": "09-malicious-dependency",
+      "name": "Malicious Typosquat Dependency",
+      "incident_mirrored": "event-stream / crossenv AWS Credential Exfiltration Hook",
+      "expected_verdict": "deny",
+      "actual_verdict": "deny",
+      "rule_evaluated": "dependency_risk_gate",
+      "evidence": "Risk score 100/100: postinstall script exfiltrates AWS_SECRET_ACCESS_KEY",
+      "latency_ms": 0.554,
+      "status": "PASS"
+    },
+    {
+      "id": "10-dependency-confusion",
+      "name": "Dependency Confusion Namespace Collision",
+      "incident_mirrored": "Alex Birsan Internal Namespace Hijack (Apple/Microsoft/PayPal)",
+      "expected_verdict": "deny",
+      "actual_verdict": "deny",
+      "rule_evaluated": "dependency_risk_gate",
+      "evidence": "Internal package byteaegis-auth collided with public registry v99.0.0",
+      "latency_ms": 0,
+      "status": "PASS"
+    },
+    {
+      "id": "11-base-image-swap",
+      "name": "Unapproved Base Image Swap",
+      "incident_mirrored": "Dockerfile Rebase onto Trojaned Public Ubuntu/Debian Base",
+      "expected_verdict": "deny",
+      "actual_verdict": "deny",
+      "rule_evaluated": "base_image_allowlist",
+      "evidence": "Base image sha256:unapproved... not in Distroless/Chainguard allowlist",
+      "latency_ms": 0.554,
+      "status": "PASS"
+    },
+    {
+      "id": "12-rollback-attack",
+      "name": "Rollback to Vulnerable Release",
+      "incident_mirrored": "Adversary Downgrade Attack to Signed-but-Vulnerable Legacy Build",
+      "expected_verdict": "deny",
+      "actual_verdict": "deny",
+      "rule_evaluated": "freshness",
+      "evidence": "Image build age exceeds 30-day limit and violates anti-rollback constraint",
+      "latency_ms": 0,
+      "status": "PASS"
+    },
+    {
+      "id": "13-ledger-tampering",
+      "name": "Audit Ledger Tampering Detection",
+      "incident_mirrored": "Insider Threat Post-Exploitation Record Alteration (deny -\u003e allow)",
+      "expected_verdict": "tamper_detected (broken index 1)",
+      "actual_verdict": "Tamper detected at record index 1 (hash chain mismatch)",
+      "rule_evaluated": "ledger_integrity",
+      "evidence": "Cryptographic hash chain broken: prev_hash mismatch on modified record",
+      "latency_ms": 0.553,
+      "status": "PASS"
+    },
+    {
+      "id": "14-degraded-mode-outage",
+      "name": "Upstream Outage Degraded Mode",
+      "incident_mirrored": "OCI Registry or Rekor Log Network Outage \u0026 Circuit Breaker",
+      "expected_verdict": "Enforce: deny (fail-closed) / Audit: observable warning",
+      "actual_verdict": "Enforce: deny / Audit: deny (mode=audit)",
+      "rule_evaluated": "circuit_breaker",
+      "evidence": "Protected namespaces fail closed; staging generates audit metrics",
+      "latency_ms": 1.166,
+      "status": "PASS"
+    }
+  ]
+}
