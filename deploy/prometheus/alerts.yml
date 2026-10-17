@@ -1,0 +1,42 @@
+groups:
+  - name: aegischain_alerts
+    rules:
+      - alert: AegisChainHighDenyRate
+        expr: (sum(rate(aegischain_engine_decisions_total{verdict="deny"}[5m])) / (sum(rate(aegischain_engine_decisions_total[5m])) + 0.001)) > 0.20
+        for: 2m
+        labels:
+          severity: warning
+          platform: aegischain
+        annotations:
+          summary: "High admission rejection rate detected in AegisChain"
+          description: "Over 20% of admission requests in the last 5 minutes were denied. Possible active supply chain attack or widespread unsigned image rollout."
+
+      - alert: AegisChainWebhookLatencyHigh
+        expr: histogram_quantile(0.95, sum(rate(aegischain_admission_latency_seconds_bucket[5m])) by (le)) > 0.300
+        for: 3m
+        labels:
+          severity: critical
+          platform: aegischain
+        annotations:
+          summary: "AegisChain admission latency exceeds SLO (>300ms p95)"
+          description: "Admission evaluation p95 latency is {{ $value }}s, exceeding the 300ms production SLO. Check remote registry round-trip and cache hit ratios."
+
+      - alert: AegisChainRiskScorerDegraded
+        expr: sum(rate(aegischain_engine_degraded_mode_total[5m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+          platform: aegischain
+        annotations:
+          summary: "AegisChain running in degraded mode"
+          description: "Downstream risk scorer or OCI registry outage triggered circuit breaker fallback. Admissions are operating under degraded security posture."
+
+      - alert: AegisChainLedgerTamperDetected
+        expr: aegischain_verify_failures_total{reason="ledger_hash_mismatch"} > 0
+        for: 0m
+        labels:
+          severity: page
+          platform: aegischain
+        annotations:
+          summary: "AegisChain decision ledger tampering detected"
+          description: "Cryptographic hash chain verification failed on decision records. Potential adversary database tampering or audit log alteration."
