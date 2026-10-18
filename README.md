@@ -101,7 +101,7 @@ The automated demo executes the following lifecycle steps against a live cluster
 
 ## Web Control Dashboard
 
-AegisChain includes a high-performance web dashboard built with React, TypeScript, and Tailwind CSS, providing platform security engineers with visual custody graphs and policy telemetry.
+AegisChain includes a high-performance web dashboard built with React, TypeScript, and a modern CSS glassmorphism design system, providing platform security engineers with visual custody graphs, interactive admission simulation, and policy telemetry.
 
 ![AegisChain Dashboard Overview](docs/img/dashboard-overview.png)
 *AegisChain Control Dashboard Overview: Workload admission rates, blocked violations, mean trust score, and active policy version.*
@@ -109,8 +109,9 @@ AegisChain includes a high-performance web dashboard built with React, TypeScrip
 ### Core Dashboard Capabilities
 
 - **Provenance DAG Explorer**: Visualizes the cryptographic chain of custody from developer Git commit to GitHub Actions runner, Cosign signature, in-toto attestations, and Kubernetes Pod deployment.
-- **Decision Explorer**: Searchable and filterable archive of all admission decisions with rule-level evidence and remediation advice.
-- **Live Dependency Risk Scorer**: Interactive interface to test npm, PyPI, and Go packages for typosquatting, dependency confusion, and install-time script risks.
+- **Decision Ledger and Inspector**: Searchable and filterable archive of all admission decisions with cryptographic SHA-256 hash-chain verification and real-time tamper detection simulation.
+- **Interactive Admission Simulator**: Real-time evaluation sandbox allowing operators to test clean workloads, tampered layers, unsigned images, and expired exemptions against active OPA Rego v1 policies.
+- **Live Dependency Risk Scorer**: Interactive interface to test npm, PyPI, and Go packages for typosquatting (Damerau-Levenshtein), dependency confusion, and install-time AST script risks.
 - **Policy and Waivers Manager**: Real-time inventory of active OPA Rego v1 policies, namespace modes, and cryptographic OpenVEX waivers with expiration countdowns.
 
 ![AegisChain Provenance Graph](docs/img/provenance-graph.png)
@@ -118,6 +119,9 @@ AegisChain includes a high-performance web dashboard built with React, TypeScrip
 
 ![AegisChain Decision Explorer](docs/img/decision-explorer.png)
 *Decision Explorer: Rule-by-rule evaluation, cryptographic evidence, and actionable remediation instructions.*
+
+![AegisChain Admission Simulator](docs/img/admission-simulator.png)
+*Admission Simulator: Interactive policy sandbox testing workloads against all eight OPA Rego v1 security gates.*
 
 ![AegisChain Dependency Risk Scorer](docs/img/risk-scorer.png)
 *Dependency Risk Scorer: Live heuristic analysis detecting typosquatting, dependency confusion, and AST script threats.*
