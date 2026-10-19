@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-10-17T09:31:47Z",
+  "timestamp": "2026-10-19T08:18:57Z",
   "platform": "AegisChain Software Supply Chain Trust Platform",
   "total_scenarios": 14,
   "passed": 14,
@@ -14,7 +14,7 @@
       "actual_verdict": "allow",
       "rule_evaluated": "all_rules",
       "evidence": "SLSA L3 + Keyless Cosign + SBOM + Trivy Scan + Clean VEX",
-      "latency_ms": 0.56,
+      "latency_ms": 0,
       "status": "PASS"
     },
     {
@@ -102,7 +102,7 @@
       "actual_verdict": "deny",
       "rule_evaluated": "dependency_risk_gate",
       "evidence": "Risk score 100/100: postinstall script exfiltrates AWS_SECRET_ACCESS_KEY",
-      "latency_ms": 0.554,
+      "latency_ms": 0.658,
       "status": "PASS"
     },
     {
@@ -124,7 +124,7 @@
       "actual_verdict": "deny",
       "rule_evaluated": "base_image_allowlist",
       "evidence": "Base image sha256:unapproved... not in Distroless/Chainguard allowlist",
-      "latency_ms": 0.554,
+      "latency_ms": 0,
       "status": "PASS"
     },
     {
@@ -135,7 +135,7 @@
       "actual_verdict": "deny",
       "rule_evaluated": "freshness",
       "evidence": "Image build age exceeds 30-day limit and violates anti-rollback constraint",
-      "latency_ms": 0,
+      "latency_ms": 0.607,
       "status": "PASS"
     },
     {
@@ -146,7 +146,7 @@
       "actual_verdict": "Tamper detected at record index 1 (hash chain mismatch)",
       "rule_evaluated": "ledger_integrity",
       "evidence": "Cryptographic hash chain broken: prev_hash mismatch on modified record",
-      "latency_ms": 0.553,
+      "latency_ms": 0,
       "status": "PASS"
     },
     {
@@ -157,7 +157,7 @@
       "actual_verdict": "Enforce: deny / Audit: deny (mode=audit)",
       "rule_evaluated": "circuit_breaker",
       "evidence": "Protected namespaces fail closed; staging generates audit metrics",
-      "latency_ms": 1.166,
+      "latency_ms": 0.911,
       "status": "PASS"
     }
   ]

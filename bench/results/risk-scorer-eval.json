@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-10-17T09:06:34Z",
+  "timestamp": "2026-10-19T08:20:39Z",
   "total_samples": 35,
   "true_positives": 13,
   "true_negatives": 22,
@@ -9,7 +9,7 @@
   "recall": 1.0,
   "f1_score": 1.0,
   "accuracy": 1.0,
-  "evaluation_duration_seconds": 0.0262,
+  "evaluation_duration_seconds": 0.0209,
   "samples": [
     {
       "package": "crossenv",
