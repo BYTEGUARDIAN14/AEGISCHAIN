@@ -109,8 +109,8 @@ AegisChain includes a high-performance web dashboard built with React, TypeScrip
 ### Core Dashboard Capabilities
 
 - **Provenance DAG Explorer**: Visualizes the cryptographic chain of custody from developer Git commit to GitHub Actions runner, Cosign signature, in-toto attestations, and Kubernetes Pod deployment.
-- **Decision Ledger and Inspector**: Searchable and filterable archive of all admission decisions with cryptographic SHA-256 hash-chain verification and real-time tamper detection simulation.
-- **Interactive Admission Simulator**: Real-time evaluation sandbox allowing operators to test clean workloads, tampered layers, unsigned images, and expired exemptions against active OPA Rego v1 policies.
+- **Decision Ledger and Inspector**: Searchable and filterable archive of all admission decisions with cryptographic SHA-256 hash-chain verification and an interactive client-side tamper detection simulator for dry-run validation.
+- **Interactive Admission Simulator (Client-Side Simulated Playground)**: In-browser evaluation sandbox allowing operators to test clean workloads, tampered layers, unsigned images, and expired exemptions against active OPA Rego v1 policies without mutating live cluster state.
 - **Live Dependency Risk Scorer**: Interactive interface to test npm, PyPI, and Go packages for typosquatting (Damerau-Levenshtein), dependency confusion, and install-time AST script risks.
 - **Policy and Waivers Manager**: Real-time inventory of active OPA Rego v1 policies, namespace modes, and cryptographic OpenVEX waivers with expiration countdowns.
 
@@ -121,7 +121,7 @@ AegisChain includes a high-performance web dashboard built with React, TypeScrip
 *Decision Explorer: Rule-by-rule evaluation, cryptographic evidence, and actionable remediation instructions.*
 
 ![AegisChain Admission Simulator](docs/img/admission-simulator.png)
-*Admission Simulator: Interactive policy sandbox testing workloads against all eight OPA Rego v1 security gates.*
+*Admission Simulator: Interactive client-side simulated policy sandbox testing workloads against all eight OPA Rego v1 security gates.*
 
 ![AegisChain Dependency Risk Scorer](docs/img/risk-scorer.png)
 *Dependency Risk Scorer: Live heuristic analysis detecting typosquatting, dependency confusion, and AST script threats.*
@@ -135,68 +135,87 @@ npm run dev
 
 ## Attack Lab Verification Results
 
-Every scenario in the matrix below is automated in `attack-lab/` and executed directly by `make attack-lab` or `powershell -File attack-lab/run.ps1`. Results are written to `bench/results/attack-lab.json` by the platform test runner:
+AegisChain maintains both an in-process simulated verification suite for offline and CI/CD validation, and a live end-to-end verification harness.
 
-| # | Scenario Name | Incident Mirrored | Expected Verdict | Actual Verdict | Latency | Status |
+### Simulated In-Process Attack Matrix
+
+The 14 scenarios in the matrix below are automated in `attack-lab/runner.go` and executed by `make attack-lab` or `powershell -File attack-lab/run.ps1`. This suite runs as an **in-process simulated test harness** using synthesized verification target payloads and in-memory In-Toto attestations to validate policy gate logic without external network dependencies. Results are recorded in `bench/results/attack-lab.json`:
+
+| # | Scenario Name | Incident Mirrored | Expected Verdict | Actual Verdict | Status | Evidence and Policy Gate |
 |---|---|---|---|---|---|---|
-| 01 | Clean Verified Workload | SolarWinds Baseline Control (False-Positive Check) | allow | allow | 0.56 ms | PASS |
-| 02 | Unsigned Container Image | Shadow IT and Unauthorized Local Push | deny | deny | 0.00 ms | PASS |
-| 03 | Tampered Layer Substitution | Registry Poisoning and In-Flight Layer Injection | deny | deny | 0.00 ms | PASS |
-| 04 | Mutable Tag Retargeting | TOCTOU Tag Hijacking (:latest retargeted) | deny | deny | 0.00 ms | PASS |
-| 05 | Wrong Signer Identity | Forked CI Workflow signing with valid Fulcio OIDC | deny | deny | 0.00 ms | PASS |
-| 06 | Untrusted Build Platform | Compromised CI Runner without SLSA L3 Builder | deny | deny | 0.00 ms | PASS |
-| 07 | Provenance Subject Mismatch | Attestation Replay Attack (Detached Subject Hash) | deny | deny | 0.00 ms | PASS |
-| 08 | Critical KEV and OpenVEX | Log4Shell Zero-Day (CVE-2021-44228) with Signed VEX | deny to allow | Phase A: deny (1 KEV) -> Phase B: allow (waived) | 0.00 ms | PASS |
-| 09 | Malicious Typosquat Dependency | event-stream / crossenv AWS Credential Exfiltration | deny | deny | 0.55 ms | PASS |
-| 10 | Dependency Confusion Collision | Alex Birsan Internal Namespace Hijack (v99.0.0) | deny | deny | 0.00 ms | PASS |
-| 11 | Unapproved Base Image Swap | Dockerfile Rebase onto Trojaned Base Distribution | deny | deny | 0.55 ms | PASS |
-| 12 | Rollback Downgrade Attack | Adversary Replay of Outdated Signed Vulnerable Image | deny | deny | 0.00 ms | PASS |
-| 13 | Decision Ledger Tampering | Insider Threat Database Record Modification | tamper_detected | Tamper detected at record index 1 | 0.55 ms | PASS |
-| 14 | Upstream Outage Degraded Mode | OCI Registry / Rekor Downtime Circuit Breaker | deny / audit | Enforce: deny / Audit: deny (mode=audit) | 1.17 ms | PASS |
+| 01 | Clean Verified Workload | SolarWinds Baseline Control | allow | allow | PASS | SLSA L3 + Keyless Cosign + SBOM + Trivy Scan + Clean VEX (rule: `all_rules`) |
+| 02 | Unsigned Container Image | Shadow IT and Unauthorized Local Push | deny | deny | PASS | Denied by rule `signature_required` |
+| 03 | Tampered Layer Substitution | In-Flight Registry Layer Injection | deny | deny | PASS | Denied by rule `signature_required` |
+| 04 | Mutable Tag Retargeting | TOCTOU Tag Hijacking (:latest retargeted) | deny | deny | PASS | Denied by rule `digest_pinning_required` |
+| 05 | Wrong Signer Identity | Forked CI Workflow with valid Fulcio OIDC | deny | deny | PASS | Denied by rule `signature_required` |
+| 06 | Untrusted Build Platform | Compromised CI Runner without SLSA L3 | deny | deny | PASS | Denied by rule `provenance_required` |
+| 07 | Provenance Subject Mismatch | Attestation Replay Attack (Detached Hash) | deny | deny | PASS | Denied by rule `provenance_required` |
+| 08 | Critical KEV and OpenVEX | Log4Shell Zero-Day with Signed OpenVEX | deny to allow | Phase A: deny -> Phase B: allow | PASS | Phase A: blocked by 1 KEV; Phase B: admitted via signed VEX waiver |
+| 09 | Malicious Typosquat Dependency | crossenv AWS Credential Exfiltration | deny | deny | PASS | Denied by rule `dependency_risk_gate` (score 100/100) |
+| 10 | Dependency Confusion Collision | Internal Namespace Collision (v99.0.0) | deny | deny | PASS | Denied by rule `dependency_risk_gate` (score 100/100) |
+| 11 | Unapproved Base Image Swap | Trojaned Base Image Substitution | deny | deny | PASS | Denied by rule `base_image_allowlist` |
+| 12 | Rollback Downgrade Attack | Adversary Replay of Outdated Vulnerable Image | deny | deny | PASS | Denied by rule `freshness` (anti-rollback limit) |
+| 13 | Decision Ledger Tampering | Insider Storage Record Modification | tamper_detected | Tamper detected at record index 1 | PASS | Detected by rule `ledger_integrity` (SHA-256 chain broken) |
+| 14 | Upstream Outage Degraded Mode | OCI Registry / Rekor Downtime Outage | deny / audit | Enforce: deny / Audit: deny (mode=audit) | PASS | Circuit breaker enforced across protected namespaces |
 
-**Attack Lab Summary**: 14 of 14 scenarios passed. Detection and enforcement rate: 100.0%.
+**Simulated Attack Lab Result File**: Proved by `bench/results/attack-lab.json` (14/14 passed, 100.0% detection rate).
 
-To run the attack lab suite independently:
+### Live End-to-End Attack Verification
+
+For live verification against a running registry and real Cosign cryptography, `attack-lab/live_attack_scenarios_2_to_5.go` deploys real container images to an active OCI registry (`127.0.0.1:5001`), signs artifacts with real keys, and sends live HTTP/TLS Kubernetes `AdmissionReview` requests to the webhook controller:
+- **Scenario 02 (Unsigned Image)**: HTTP 403 Forbidden (`AegisChain Policy Enforce Denial: Container app: verification failed (50/100) - [Rule signature_required] Artifact has zero valid cryptographic signatures`).
+- **Scenario 03 (Tampered Layers)**: HTTP 403 Forbidden (`AegisChain Policy Enforce Denial: Container app: verification failed (50/100) - signature broken by mutated digest`).
+- **Scenario 04 (Mutable Tag)**: HTTP 403 Forbidden (`AegisChain Policy Enforce Denial: Container app: verification failed (50/100) - unpinned mutable tag denied`).
+- **Scenario 05 (Wrong Signer)**: HTTP 403 Forbidden (`AegisChain Policy Enforce Denial: Container app: verification failed (50/100) - signed by unauthorized rogue key`).
+
+To run the attack lab test suites:
 ```bash
-# Using Make
-make attack-lab
+# In-process simulated attack matrix
+go run ./attack-lab/runner.go
 
-# Using PowerShell
-powershell -ExecutionPolicy Bypass -File .\attack-lab\run.ps1
-
-# Using Bash
-bash ./attack-lab/run.sh
+# Live registry and Cosign attack verification
+go run ./attack-lab/live_attack_scenarios_2_to_5.go
 ```
 
 ## Empirically Measured Benchmarks
 
-All benchmark figures below are generated by real runs of `bench/runner/main.go` and `k6` load testing against local hardware. The results are stored in `bench/results/latency.json` and `bench/results/benchmarks.json`:
+AegisChain provides two distinct benchmark suites: an in-process microbenchmark measuring pure OPA Rego rule evaluation and verifier algorithms, and a live end-to-end benchmark measuring live TLS roundtrips against a real OCI registry.
 
-| Benchmark Metric | Target SLO | Empirically Measured Result | Measurement Methodology |
-|---|---|---|---|
-| Warm Cache Admission Latency (p50) | < 100.0 ms | 1.49 ms | In-process concurrent evaluation (10 workers, 500 requests) |
-| Warm Cache Admission Latency (p95) | < 300.0 ms | 2.54 ms | Target SLO met (2.54 ms < 300 ms SLO threshold) |
-| Warm Cache Admission Latency (p99) | < 500.0 ms | 3.08 ms | Tail latency bounded under sustained concurrency |
-| Cold Cache Evaluation Latency (p50) | < 500.0 ms | 0.52 ms | Cold evaluation across 50 distinct image digest references |
-| Cold Cache Evaluation Latency (p95) | < 1000.0 ms | 1.13 ms | Full OPA Rego v1 rule compilation and target parsing |
-| Sustained Admission Throughput | > 1000 req/s | 6,808 req/s | Measured across 10 concurrent worker goroutines |
-| False Positive Rate (FPR) | 0.00% | 0.00% (0 / 25) | Evaluated across 25 distinct clean build configurations |
-| Webhook Memory Footprint (Heap) | < 64.0 MB | 4.18 MB | Measured via runtime.MemStats (HeapAlloc) |
-| Webhook Total System Memory (Sys) | < 128.0 MB | 32.02 MB | Bounded memory consumption with active OPA engine |
-| k6 Warm HTTP Request Duration (p95) | < 300.0 ms | 0.70 ms | Measured via k6 load generator over 1960 HTTP requests |
+### 1. In-Process Evaluation Benchmark (Zero-Network Synthetic Targets)
 
-**Benchmark Caveats and Hardware Context**: Measured on Windows AMD64 hardware (16 CPUs, Go 1.23.2). Production Kubernetes deployments with network round-trips to remote OCI registries and transparency logs will experience additional network RTT.
+The numbers below are measured by `bench/runner/main.go` and recorded in `bench/results/benchmarks.json` and `bench/results/latency.json`. This suite benchmarks the in-memory verification library and OPA Rego evaluation engine:
 
-To run the empirical benchmarks independently:
+| Benchmark Metric | Target SLO | Empirically Measured Result | Result File Citation | Measurement Context and Caveats |
+|---|---|---|---|---|
+| Warm Cache Admission Latency (p50) | < 100.0 ms | 1.10 ms | `bench/results/benchmarks.json` | In-process concurrent evaluation (10 workers, 500 requests) |
+| Warm Cache Admission Latency (p95) | < 300.0 ms | 2.66 ms | `bench/results/benchmarks.json` | Target SLO met (2.66 ms < 300 ms SLO threshold) |
+| Warm Cache Admission Latency (p99) | < 500.0 ms | 3.98 ms | `bench/results/benchmarks.json` | Tail latency bounded under sustained concurrency |
+| Cold Cache Evaluation Latency (p50) | < 500.0 ms | 0.52 ms | `bench/results/latency.json` | Sequential single-goroutine evaluation (50 distinct targets) |
+| Cold Cache Evaluation Latency (p95) | < 1000.0 ms | 1.53 ms | `bench/results/latency.json` | Full OPA Rego v1 evaluation with synthetic target structs |
+| Sustained Admission Throughput | > 1000 req/s | 7,726 req/s | `bench/results/benchmarks.json` | In-memory evaluation across 10 concurrent worker goroutines |
+| False Positive Rate (FPR) | 0.00% | 0.00% (0 / 25) | `bench/results/benchmarks.json` | Evaluated across 25 distinct clean build configurations |
+| Webhook Memory Footprint (Heap) | < 64.0 MB | 5.89 MB | `bench/results/latency.json` | Measured via runtime.MemStats (HeapAlloc) |
+| Webhook Total System Memory (Sys) | < 128.0 MB | 32.14 MB | `bench/results/latency.json` | Bounded memory consumption with active OPA engine |
+
+**In-Process Latency Note**: In this in-memory test suite, cold evaluation runs sequentially in a single goroutine (0.52 ms p50) without network I/O, whereas warm evaluation runs across 10 concurrent worker goroutines (1.10 ms p50) contending for Go scheduler CPU threads and synchronization primitives.
+
+### 2. Live End-to-End Admission Benchmark (Real TLS + Real Registry + Real Cosign)
+
+To measure production conditions with real network I/O, `bench/live_webhook_bench.go` executes an end-to-end benchmark against a live OCI registry (`127.0.0.1:5001`) with real Sigstore Cosign signatures and TLS HTTP requests to the webhook controller:
+
+| Live Benchmark Phase | Measured Latency | Operational Breakdown |
+|---|---|---|
+| **Cold Admission Request** | **1188.31 ms** | Real TLS handshake, remote registry manifest resolution, Cosign subprocess execution, in-toto attestation retrieval, OPA Rego evaluation, and ledger write. |
+| **Warm Admission Requests (Avg)** | **1011.86 ms** | Live TLS request, resolver cache hit, verifier report cache hit, Cosign signature validation, and OPA policy evaluation. |
+| **Cold to Warm Ratio** | **1.17x** | Cold is slower than warm due to initial network resolution and subprocess initialization. |
+
+To run the benchmarks independently:
 ```bash
-# Using Make
-make bench
-
-# Using Go directly
+# In-process engine benchmark
 go run ./bench/runner/main.go
 
-# Using k6 HTTP load test
-k6 run bench/k6/admission-latency.js
+# Live TLS webhook and registry benchmark
+go run ./bench/live_webhook_bench.go
 ```
 
 ## OPA Rego v1 Policy Matrix
@@ -229,6 +248,8 @@ The Dependency Risk Scorer evaluates dependency sets from SBOMs and package mani
 | **Maintainer Churn** | +20 pts | Maintainer changed within last 14 days following > 180 days dormancy | Warning flag |
 | **Release Cadence Anomaly** | +15 pts | Version jump > 3 major versions or multiple releases within 1 hour | Informational |
 | **Repository Health** | +15 pts | OpenSSF Scorecard score < 4.0 | Contributes to score |
+
+**Empirical Evaluation Result**: Proved by `bench/results/risk-scorer-eval.json`. Evaluated against a 35-package labeled corpus (`risk-scorer/eval/corpus.json`): 13 True Positives, 22 True Negatives, 0 False Positives, 0 False Negatives (Precision: 100.0%, Recall: 100.0%, F1-Score: 1.0000).
 
 ## STRIDE Threat Model Mapping
 
