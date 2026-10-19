@@ -63,10 +63,22 @@ type StatusResult struct {
 	Reason  string `json:"reason,omitempty"`
 }
 
+// SecurityContextSpec models container-level security attributes.
+type SecurityContextSpec struct {
+	Privileged *bool `json:"privileged,omitempty"`
+}
+
+// VolumeSpec models pod volume mounts for hostPath analysis.
+type VolumeSpec struct {
+	Name     string `json:"name"`
+	HostPath any    `json:"hostPath,omitempty"`
+}
+
 // ContainerSpec holds container name and image reference.
 type ContainerSpec struct {
-	Name  string `json:"name"`
-	Image string `json:"image"`
+	Name            string               `json:"name"`
+	Image           string               `json:"image"`
+	SecurityContext *SecurityContextSpec `json:"securityContext,omitempty"`
 }
 
 // PodSpec holds container definitions for analysis.
@@ -75,6 +87,16 @@ type PodSpec struct {
 	InitContainers      []ContainerSpec `json:"initContainers,omitempty"`
 	EphemeralContainers []ContainerSpec `json:"ephemeralContainers,omitempty"`
 	HostNetwork         bool            `json:"hostNetwork,omitempty"`
+	Volumes             []VolumeSpec    `json:"volumes,omitempty"`
+}
+
+// WorkloadMeta holds derived Pod-level runtime security parameters.
+type WorkloadMeta struct {
+	Name        string
+	Privileged  bool
+	HostNetwork bool
+	HostPath    bool
+	Annotations map[string]string
 }
 
 // PodObject models the Kubernetes Pod resource metadata and spec.

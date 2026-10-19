@@ -78,6 +78,7 @@ func main() {
 		rawHash := fmt.Sprintf("%064s", id)
 		digest := "sha256:" + rawHash
 		sub := []verify.SubjectDigest{{Name: "app", Digest: map[string]string{"sha256": rawHash}}}
+		_ = sub
 
 		sigs := customSignatures
 		if sigs == nil {
