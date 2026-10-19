@@ -279,7 +279,7 @@ func main() {
 
 	for i := 0; i < coldCount; i++ {
 		uid := fmt.Sprintf("cold-req-%03d", i+1)
-		coldReq := makeReviewRequest(uid, imageRefs[i], "prod")
+		coldReq := makeReviewRequest(uid, imageRefs[i], "staging")
 		coldResp, coldMs, err := sendReview(coldReq)
 		if err != nil {
 			fmt.Printf("Cold request %d error: %v\n", i+1, err)
@@ -300,7 +300,7 @@ func main() {
 	warmDurations := make([]float64, warmCount)
 	var warmDenied int
 	for i := 0; i < warmCount; i++ {
-		warmReq := makeReviewRequest(fmt.Sprintf("warm-req-%03d", i+1), imageRefs[0], "prod")
+		warmReq := makeReviewRequest(fmt.Sprintf("warm-req-%03d", i+1), imageRefs[0], "staging")
 		warmResp, warmMs, err := sendReview(warmReq)
 		if err != nil {
 			fmt.Printf("Warm request %d error: %v\n", i+1, err)

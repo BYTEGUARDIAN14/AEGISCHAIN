@@ -51,16 +51,26 @@ determine_verdict(failed) := "allow" if {
 rule_signature_required = {
 	"id": "signature_required",
 	"result": "pass",
-	"evidence": [sprintf("identity:%s", [input.signature.identity])]
+	"evidence": [sprintf("mode:%s", [object.get(input.signature, "mode", "keyless")])]
 } if {
-	input.signature.valid == true
-	input.signature.issuer == "https://token.actions.githubusercontent.com"
-	regex.match("^https://github.com/BYTEGUARDIAN14/.*", input.signature.identity)
+	is_valid_signature
 } else = {
 	"id": "signature_required",
 	"result": "fail",
-	"reason": "Valid keyless signature from trusted identity not found",
-	"remediation": "Sign image using GitHub Actions OIDC workflow under approved organization"
+	"reason": "Valid signature from trusted key or identity not found",
+	"remediation": "Sign image using authorized release keys or GitHub Actions OIDC workflow under approved organization"
+}
+
+is_valid_signature if {
+	input.signature.valid == true
+	object.get(input.signature, "mode", "keyless") == "key"
+}
+
+is_valid_signature if {
+	input.signature.valid == true
+	object.get(input.signature, "mode", "keyless") != "key"
+	input.signature.issuer == "https://token.actions.githubusercontent.com"
+	regex.match("^https://github.com/BYTEGUARDIAN14/.*", input.signature.identity)
 }
 
 # Rule 2: provenance_required

@@ -64,7 +64,10 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      - name: Run Tests with Race Detector
+      - name: Run Race Detection
+        run: go test -race ./...
+
+      - name: Run Tests with Race Detector and Coverage
         run: |
           go test -v -race -covermode=atomic -coverprofile=coverage.out ./...
 
