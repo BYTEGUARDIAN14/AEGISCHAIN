@@ -1089,15 +1089,9 @@ func (s *AdmissionServer) evaluateContainer(ctx context.Context, imageRef, names
 		}
 	}
 
-	// Derive Signature Identity & Issuer
+	// Derive Signature Identity & Issuer directly from signature payload / verified claims
 	sigIdentity := lastSignerIdentity
 	sigIssuer := lastSignerIssuer
-	if sigIdentity == "" {
-		sigIdentity = "https://github.com/BYTEGUARDIAN14/aegischain/.github/workflows/release.yml@refs/tags/v1.0.0"
-	}
-	if sigIssuer == "" {
-		sigIssuer = "https://token.actions.githubusercontent.com"
-	}
 
 	opaInput := map[string]interface{}{
 		"mode": mode,

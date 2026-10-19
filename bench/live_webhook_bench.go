@@ -75,7 +75,10 @@ func main() {
 	}
 	defer regListener.Close()
 
-	regServer := &http.Server{Handler: regHandler}
+	regServer := &http.Server{
+		Handler:           regHandler,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
 	go func() {
 		if err := regServer.Serve(regListener); err != nil && err != http.ErrServerClosed {
 			fmt.Printf("Registry server error: %v\n", err)
@@ -231,11 +234,11 @@ func main() {
 		fmt.Printf("FATAL: Failed to start admission-webhook: %v\n", err)
 		os.Exit(1)
 	}
-	defer webhookBinCmd.Process.Kill()
+	defer func() { _ = webhookBinCmd.Process.Kill() }()
 
 	// Wait for webhook /healthz
 	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // #nosec G402 -- loopback benchmark with ephemeral self-signed cert
 	}
 	client := &http.Client{Transport: tr, Timeout: 10 * time.Second}
 	webhookURL := fmt.Sprintf("https://127.0.0.1:%s/validate", webhookPort)

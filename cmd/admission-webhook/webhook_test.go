@@ -402,7 +402,10 @@ func TestMutatingWebhookPreventsTagRetargetPoisoning(t *testing.T) {
 	require.NoError(t, err)
 	defer regListener.Close()
 
-	regServer := &http.Server{Handler: regHandler}
+	regServer := &http.Server{
+		Handler:           regHandler,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
 	go func() { _ = regServer.Serve(regListener) }()
 
 	regAddr := regListener.Addr().String()

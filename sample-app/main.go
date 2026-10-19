@@ -41,10 +41,11 @@ func main() {
 	mux.HandleFunc("/readyz", healthHandler)
 
 	srv := &http.Server{
-		Addr:         ":" + port,
-		Handler:      mux,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		Addr:              ":" + port,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       5 * time.Second,
+		WriteTimeout:      10 * time.Second,
 	}
 
 	log.Printf("sample-app listening on port %s", port)

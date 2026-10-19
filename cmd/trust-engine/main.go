@@ -47,10 +47,11 @@ func main() {
 	apiServer.RegisterRoutes(mux)
 
 	srv := &http.Server{
-		Addr:         ":" + port,
-		Handler:      mux,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		Addr:              ":" + port,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
 	}
 
 	slog.Info("Starting AegisChain Trust Engine REST API", "port", port)

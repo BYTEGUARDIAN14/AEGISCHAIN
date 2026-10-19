@@ -69,7 +69,10 @@ func main() {
 		os.Exit(1)
 	}
 	defer regListener.Close()
-	regServer := &http.Server{Handler: regHandler}
+	regServer := &http.Server{
+		Handler:           regHandler,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
 	go func() { _ = regServer.Serve(regListener) }()
 	fmt.Println("[Setup 1/3] Real OCI Registry running on http://127.0.0.1:5001")
 
@@ -132,11 +135,11 @@ func main() {
 		fmt.Printf("FATAL: Failed to start admission-webhook: %v\n", err)
 		os.Exit(1)
 	}
-	defer webhookBinCmd.Process.Kill()
+	defer func() { _ = webhookBinCmd.Process.Kill() }()
 
 	// Wait for webhook /healthz
 	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // #nosec G402 -- loopback test with ephemeral self-signed cert
 	}
 	client := &http.Client{Transport: tr, Timeout: 10 * time.Second}
 	webhookURL := fmt.Sprintf("https://127.0.0.1:%s/validate", webhookPort)
@@ -492,7 +495,7 @@ func main() {
 	}
 
 	vulnScanFile := filepath.Join(tempDir, "vuln_scan_kev.json")
-	_ = os.WriteFile(vulnScanFile, []byte(`{"vulnerabilities":[{"id":"CVE-2023-38606","severity":"CRITICAL","kev":true}]}`), 0644)
+	_ = os.WriteFile(vulnScanFile, []byte(`{"vulnerabilities":[{"id":"CVE-2023-38606","severity":"CRITICAL","kev":true}]}`), 0600)
 	attVulnCmd := exec.Command("cosign", "attest", "--key", validKeyPath,
 		"--yes", "--type", "https://cosign.sigstore.dev/attestation/vuln/v1",
 		"--predicate", vulnScanFile,
@@ -522,7 +525,7 @@ func main() {
 	fmt.Println("SCENARIO 09: SAME IMAGE WITH SIGNED OPENVEX WAIVER ADMITTED")
 	fmt.Println("=========================================================================================")
 	vexFile := filepath.Join(tempDir, "openvex_waiver.json")
-	_ = os.WriteFile(vexFile, []byte(`{"statements":[{"vulnerability":{"name":"CVE-2023-38606"},"status":"not_affected","justification":"vulnerable_code_not_in_execute_path"}]}`), 0644)
+	_ = os.WriteFile(vexFile, []byte(`{"statements":[{"vulnerability":{"name":"CVE-2023-38606"},"status":"not_affected","justification":"vulnerable_code_not_in_execute_path"}]}`), 0600)
 
 	attVexCmd := exec.Command("cosign", "attest", "--key", validKeyPath,
 		"--yes", "--type", "https://openvex.dev/ns/v0.2.0",
@@ -716,7 +719,7 @@ func main() {
 	_ = attSlsaCmd13.Run()
 
 	maliciousSbomFile := filepath.Join(tempDir, "cyclonedx_malicious.json")
-	_ = os.WriteFile(maliciousSbomFile, []byte(`{"bomFormat":"CycloneDX","specVersion":"1.5","components":[{"name":"cross-env-malicious","ecosystem":"npm","version":"1.0.0"}]}`), 0644)
+	_ = os.WriteFile(maliciousSbomFile, []byte(`{"bomFormat":"CycloneDX","specVersion":"1.5","components":[{"name":"cross-env-malicious","ecosystem":"npm","version":"1.0.0"}]}`), 0600)
 	attSbomCmd13 := exec.Command("cosign", "attest", "--key", validKeyPath,
 		"--yes", "--type", "https://cyclonedx.org/schema",
 		"--predicate", maliciousSbomFile,
