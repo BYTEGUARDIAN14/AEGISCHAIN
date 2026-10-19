@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
@@ -60,7 +62,7 @@ func main() {
 	fmt.Println("=========================================================================================")
 
 	// 1. Start real OCI registry on 127.0.0.1:5001
-	regHandler := registry.New()
+	regHandler := registry.New(registry.Logger(log.New(io.Discard, "", 0)))
 	regListener, err := net.Listen("tcp", "127.0.0.1:5001")
 	if err != nil {
 		fmt.Printf("FATAL: Failed to start registry on :5001: %v\n", err)
@@ -80,6 +82,7 @@ func main() {
 	defer os.RemoveAll(attackerDir)
 	attackerKey := filepath.Join(attackerDir, "attacker.key")
 	attackerPub := filepath.Join(attackerDir, "attacker.pub")
+	_ = attackerPub
 	genAttackerKey := exec.Command("cosign", "generate-key-pair", "--output-key-prefix", filepath.Join(attackerDir, "attacker"))
 	genAttackerKey.Env = append(os.Environ(), "COSIGN_PASSWORD=attackerpass")
 	if out, err := genAttackerKey.CombinedOutput(); err != nil {
@@ -199,29 +202,45 @@ func main() {
 	}
 
 	// -----------------------------------------------------------------------------------------
-	// SCENARIO 03: Tampered Image Layer Substitution
+	// SCENARIO 03: Copied Signature Onto Modified Digest
 	// -----------------------------------------------------------------------------------------
 	fmt.Println("\n=========================================================================================")
-	fmt.Println("SCENARIO 03: TAMPERED IMAGE LAYER SUBSTITUTION")
+	fmt.Println("SCENARIO 03: COPIED SIGNATURE ATTACK ONTO MODIFIED IMAGE DIGEST")
 	fmt.Println("=========================================================================================")
-	s3Ref := "127.0.0.1:5001/scenario-03-tampered:v1.0.0"
-	pushRandomImage(s3Ref)
-	// Sign original
+	s3CleanRef := "127.0.0.1:5001/scenario-03-copied-sig:clean"
+	s3CleanDigest := pushRandomImage(s3CleanRef)
+	fmt.Printf("[Push] Pushed clean image: %s (digest: %s)\n", s3CleanRef, s3CleanDigest[:20]+"...")
+
+	// Sign clean image with legitimate key
 	signCmd := exec.Command("cosign", "sign", "--key", filepath.Join("deploy", "keys", "cosign.key"),
-		"--yes", "--tlog-upload=false", "--allow-http-registry=true", "--allow-insecure-registry=true", s3Ref)
+		"--yes", "--tlog-upload=false", "--allow-http-registry=true", "--allow-insecure-registry=true", s3CleanRef)
 	signCmd.Env = append(os.Environ(), "COSIGN_PASSWORD=testpassword123")
-	_ = signCmd.Run()
-	fmt.Printf("[Sign] Signed original artifact: %s\n", s3Ref)
+	if out, err := signCmd.CombinedOutput(); err != nil {
+		fmt.Printf("FATAL: Signing clean image failed: %v (out: %s)\n", err, string(out))
+	}
+	fmt.Printf("[Sign] Cryptographically signed clean artifact with valid key: %s\n", s3CleanRef)
 
-	// Now tamper: overwrite with different image layer under same tag so digest mutates
-	tamperedR, _ := name.ParseReference(s3Ref, name.Insecure)
-	tamperedImg, _ := random.Image(2048, 2)
-	_ = remote.Write(tamperedR, tamperedImg)
-	descTampered, _ := remote.Head(tamperedR)
-	fmt.Printf("[Tamper] Injected modified layer; new image digest: %s (signature broken!)\n", descTampered.Digest.String()[:20]+"...")
+	// Now create a modified image with a distinct digest
+	s3ModifiedRef := "127.0.0.1:5001/scenario-03-copied-sig:modified"
+	s3ModifiedDigest := pushRandomImage(s3ModifiedRef)
+	fmt.Printf("[Push] Pushed modified/tampered image: %s (digest: %s)\n", s3ModifiedRef, s3ModifiedDigest[:20]+"...")
 
-	fmt.Println("[Action] Sending Kubernetes AdmissionReview for tampered workload...")
-	s3Resp := sendAdmissionReview("scenario-03-uid", s3Ref, "prod")
+	// Attack execution: Copy the valid signature artifact from clean digest to modified digest
+	cleanSigTag := fmt.Sprintf("127.0.0.1:5001/scenario-03-copied-sig:sha256-%s.sig", strings.TrimPrefix(s3CleanDigest, "sha256:"))
+	cleanSigRef, _ := name.ParseReference(cleanSigTag, name.Insecure)
+	cleanSigImg, err := remote.Image(cleanSigRef)
+	if err != nil {
+		fmt.Printf("FATAL: Failed to read clean signature image from registry: %v\n", err)
+	}
+	modifiedSigTag := fmt.Sprintf("127.0.0.1:5001/scenario-03-copied-sig:sha256-%s.sig", strings.TrimPrefix(s3ModifiedDigest, "sha256:"))
+	modifiedSigRef, _ := name.ParseReference(modifiedSigTag, name.Insecure)
+	if err := remote.Write(modifiedSigRef, cleanSigImg); err != nil {
+		fmt.Printf("FATAL: Failed to copy signature artifact to modified digest: %v\n", err)
+	}
+	fmt.Printf("[Attack] Copied valid signature artifact from %s to %s\n", cleanSigTag, modifiedSigTag)
+
+	fmt.Println("[Action] Sending Kubernetes AdmissionReview for modified image with copied signature...")
+	s3Resp := sendAdmissionReview("scenario-03-uid", s3ModifiedRef, "prod")
 	fmt.Println("\n[CAPTURE] Exact AdmissionReview Response:")
 	if s3Resp.Response != nil {
 		fmt.Printf("  Allowed: %v\n", s3Resp.Response.Allowed)
@@ -233,43 +252,100 @@ func main() {
 	}
 
 	// -----------------------------------------------------------------------------------------
-	// SCENARIO 04: Mutable Tag Retargeting
+	// SCENARIO 04: Sign Tag, Admit It, Retarget Tag to Different Image, Show Denial
 	// -----------------------------------------------------------------------------------------
 	fmt.Println("\n=========================================================================================")
-	fmt.Println("SCENARIO 04: MUTABLE TAG RETARGETING / UNPINNED TAG POLICY VIOLATION")
+	fmt.Println("SCENARIO 04: MUTABLE TAG RETARGETING ATTACK (SIGN, ADMIT, RETARGET, DENIAL)")
 	fmt.Println("=========================================================================================")
-	s4Ref := "127.0.0.1:5001/scenario-04-mutable:latest"
-	pushRandomImage(s4Ref)
-	fmt.Printf("[Push] Pushed image using mutable unpinned tag ':latest': %s\n", s4Ref)
-	fmt.Println("[Action] Sending Kubernetes AdmissionReview for mutable tag workload...")
+	s4Ref := "127.0.0.1:5001/scenario-04-tag-retarget:release-v1"
+	s4DigestA := pushRandomImage(s4Ref)
+	fmt.Printf("[Step 1: Push] Pushed legitimate initial image: %s (digest: %s)\n", s4Ref, s4DigestA[:20]+"...")
 
-	s4Resp := sendAdmissionReview("scenario-04-uid", s4Ref, "prod")
-	fmt.Println("\n[CAPTURE] Exact AdmissionReview Response:")
-	if s4Resp.Response != nil {
-		fmt.Printf("  Allowed: %v\n", s4Resp.Response.Allowed)
-		if s4Resp.Response.Status != nil {
-			fmt.Printf("  HTTP Status Code: %d\n", s4Resp.Response.Status.Code)
-			fmt.Printf("  Status Reason:    %s\n", s4Resp.Response.Status.Reason)
-			fmt.Printf("  Denial Message:\n%s\n", s4Resp.Response.Status.Message)
+	// Sign the tag with legitimate key
+	s4SignCmd := exec.Command("cosign", "sign", "--key", filepath.Join("deploy", "keys", "cosign.key"),
+		"--yes", "--tlog-upload=false", "--allow-http-registry=true", "--allow-insecure-registry=true", s4Ref)
+	s4SignCmd.Env = append(os.Environ(), "COSIGN_PASSWORD=testpassword123")
+	if out, err := s4SignCmd.CombinedOutput(); err != nil {
+		fmt.Printf("FATAL: Signing s4 image failed: %v (out: %s)\n", err, string(out))
+	}
+	// Attach in-toto attestations so all policy gates pass for initial admission
+	attestations := []struct {
+		predType string
+		file     string
+	}{
+		{"https://cyclonedx.org/schema", "sample-app/attestations/cyclonedx.json"},
+		{"https://cosign.sigstore.dev/attestation/vuln/v1", "sample-app/attestations/trivy-scan.json"},
+		{"https://openvex.dev/ns/v0.2.0", "sample-app/attestations/openvex.json"},
+		{"https://slsa.dev/provenance/v1", "sample-app/attestations/slsa-provenance.json"},
+	}
+	for _, att := range attestations {
+		attCmd := exec.Command("cosign", "attest", "--key", filepath.Join("deploy", "keys", "cosign.key"),
+			"--yes", "--type", att.predType, "--predicate", att.file,
+			"--allow-http-registry=true", "--allow-insecure-registry=true", "--tlog-upload=false", s4Ref)
+		attCmd.Env = append(os.Environ(), "COSIGN_PASSWORD=testpassword123")
+		_ = attCmd.Run()
+	}
+	fmt.Printf("[Step 2: Sign & Attest] Cryptographically signed and attested %s\n", s4Ref)
+
+	// Send initial AdmissionReview -> MUST BE ADMITTED
+	fmt.Println("[Step 3: Initial Review] Sending Kubernetes AdmissionReview for initial image...")
+	s4Resp1 := sendAdmissionReview("scenario-04-initial-uid", s4Ref, "prod")
+	fmt.Println("\n[CAPTURE] Initial AdmissionReview Response:")
+	if s4Resp1.Response != nil {
+		fmt.Printf("  Allowed: %v\n", s4Resp1.Response.Allowed)
+		if s4Resp1.Response.Status != nil {
+			fmt.Printf("  HTTP Status Code: %d\n", s4Resp1.Response.Status.Code)
+			fmt.Printf("  Status Message:   %s\n", s4Resp1.Response.Status.Message)
+		} else {
+			fmt.Println("  Status: 200 OK (Workload admitted successfully into cluster)")
+		}
+	}
+
+	// Retarget the tag! Overwrite the tag with a different image
+	s4RefParsed, _ := name.ParseReference(s4Ref, name.Insecure)
+	s4DiffImg, _ := random.Image(4096, 3)
+	_ = remote.Write(s4RefParsed, s4DiffImg)
+	descB, _ := remote.Head(s4RefParsed)
+	s4DigestB := descB.Digest.String()
+	fmt.Printf("\n[Step 4: Tag Retarget Attack] Retargeted tag %s to different image digest: %s (mutated from %s)\n",
+		s4Ref, s4DigestB[:20]+"...", s4DigestA[:20]+"...")
+
+	// Send second AdmissionReview -> MUST BE DENIED with tag_retarget_violation
+	fmt.Println("[Step 5: Post-Retarget Review] Sending Kubernetes AdmissionReview after tag retargeting...")
+	s4Resp2 := sendAdmissionReview("scenario-04-retargeted-uid", s4Ref, "prod")
+	fmt.Println("\n[CAPTURE] Post-Retarget AdmissionReview Response:")
+	if s4Resp2.Response != nil {
+		fmt.Printf("  Allowed: %v\n", s4Resp2.Response.Allowed)
+		if s4Resp2.Response.Status != nil {
+			fmt.Printf("  HTTP Status Code: %d\n", s4Resp2.Response.Status.Code)
+			fmt.Printf("  Status Reason:    %s\n", s4Resp2.Response.Status.Reason)
+			fmt.Printf("  Denial Message:\n%s\n", s4Resp2.Response.Status.Message)
 		}
 	}
 
 	// -----------------------------------------------------------------------------------------
-	// SCENARIO 05: Wrong Signer Workflow Identity
+	// SCENARIO 05: Wrong Signer Workflow Identity / Unexpected Identity Named
 	// -----------------------------------------------------------------------------------------
 	fmt.Println("\n=========================================================================================")
-	fmt.Println("SCENARIO 05: WRONG SIGNER WORKFLOW IDENTITY / UNTRUSTED SIGNING KEY")
+	fmt.Println("SCENARIO 05: WRONG SIGNER WORKFLOW IDENTITY (UNEXPECTED IDENTITY NAMED IN DENIAL)")
 	fmt.Println("=========================================================================================")
-	s5Ref := "127.0.0.1:5001/scenario-05-wrong-signer:v1.0.0"
-	pushRandomImage(s5Ref)
-	// Sign with attacker keypair instead of approved platform key
-	rogueSignCmd := exec.Command("cosign", "sign", "--key", attackerKey,
-		"--yes", "--tlog-upload=false", "--allow-http-registry=true", "--allow-insecure-registry=true", s5Ref)
-	rogueSignCmd.Env = append(os.Environ(), "COSIGN_PASSWORD=attackerpass")
-	_ = rogueSignCmd.Run()
-	fmt.Printf("[Rogue Sign] Signed %s using unauthorized rogue key (%s)\n", s5Ref, attackerPub)
-	fmt.Println("[Action] Sending Kubernetes AdmissionReview to verify signer identity enforcement...")
+	s5Ref := "127.0.0.1:5001/scenario-05-unexpected-identity:v1.0.0"
+	s5Digest := pushRandomImage(s5Ref)
+	fmt.Printf("[Push] Pushed image: %s (digest: %s)\n", s5Ref, s5Digest[:20]+"...")
 
+	unexpectedIdentity := "https://github.com/evil-actor/rogue-supply-chain/.github/workflows/backdoor.yml@refs/heads/main"
+	// Sign with attacker key and inject unexpected identity annotation
+	rogueSignCmd := exec.Command("cosign", "sign", "--key", attackerKey,
+		"--yes", "--tlog-upload=false", "--allow-http-registry=true", "--allow-insecure-registry=true",
+		"-a", "identity="+unexpectedIdentity,
+		s5Ref)
+	rogueSignCmd.Env = append(os.Environ(), "COSIGN_PASSWORD=attackerpass")
+	if out, err := rogueSignCmd.CombinedOutput(); err != nil {
+		fmt.Printf("FATAL: Rogue signing failed: %v (out: %s)\n", err, string(out))
+	}
+	fmt.Printf("[Rogue Sign] Signed artifact with unauthorized key asserting identity: %s\n", unexpectedIdentity)
+
+	fmt.Println("[Action] Sending Kubernetes AdmissionReview to verify unexpected identity rejection...")
 	s5Resp := sendAdmissionReview("scenario-05-uid", s5Ref, "prod")
 	fmt.Println("\n[CAPTURE] Exact AdmissionReview Response:")
 	if s5Resp.Response != nil {

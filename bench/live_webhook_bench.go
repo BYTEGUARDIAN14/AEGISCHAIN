@@ -7,11 +7,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
+	"math"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
@@ -61,7 +64,7 @@ func main() {
 	fmt.Println("=========================================================================================")
 
 	// 1. Start real OCI registry on 127.0.0.1:5001
-	regHandler := registry.New()
+	regHandler := registry.New(registry.Logger(log.New(io.Discard, "", 0)))
 	regListener, err := net.Listen("tcp", "127.0.0.1:5001")
 	if err != nil {
 		fmt.Printf("FATAL: Failed to start registry listener on :5001: %v\n", err)
@@ -196,8 +199,9 @@ func main() {
 		"-audit-namespaces", "staging",
 		"-default-mode", "enforce",
 	)
-	webhookBinCmd.Stdout = os.Stdout
-	webhookBinCmd.Stderr = os.Stderr
+	webhookLogFile, _ := os.Create(filepath.Join(tempDir, "webhook.log"))
+	webhookBinCmd.Stdout = webhookLogFile
+	webhookBinCmd.Stderr = webhookLogFile
 	if err := webhookBinCmd.Start(); err != nil {
 		fmt.Printf("FATAL: Failed to start admission-webhook: %v\n", err)
 		os.Exit(1)
@@ -255,7 +259,7 @@ func main() {
 		body, _ := json.Marshal(req)
 		t0 := time.Now()
 		httpResp, err := client.Post(webhookURL, "application/json", bytes.NewReader(body))
-		durationMs := float64(time.Since(t0).Microseconds()) / 1000.0
+		durationMs := float64(time.Since(t0).Nanoseconds()) / 1e6
 		if err != nil {
 			return AdmissionReview{}, durationMs, err
 		}
@@ -285,35 +289,53 @@ func main() {
 		}
 	}
 
-	// WARM REQUESTS (5 iterations)
-	warmDurations := make([]float64, 5)
-	for i := 0; i < 5; i++ {
+	// WARM REQUESTS (250 iterations)
+	const warmCount = 250
+	fmt.Printf("\nExecuting %d Warm AdmissionReview Requests over live TLS...\n", warmCount)
+	warmDurations := make([]float64, warmCount)
+	for i := 0; i < warmCount; i++ {
 		warmReq := makeReviewRequest(fmt.Sprintf("warm-req-%03d", i+1), imgRef, "prod")
-		warmResp, warmMs, err := sendReview(warmReq)
+		_, warmMs, err := sendReview(warmReq)
 		if err != nil {
 			fmt.Printf("Warm request %d error: %v\n", i+1, err)
 		}
 		warmDurations[i] = warmMs
-		if i == 0 && warmResp.Response != nil {
-			fmt.Printf("WARM REQUEST ADMISSION LATENCY (sample 1): %.2f ms\n", warmMs)
-			fmt.Printf("  Allowed:  %v\n", warmResp.Response.Allowed)
-		}
 	}
 
+	sort.Float64s(warmDurations)
+	n := float64(len(warmDurations))
 	var warmSum float64
 	for _, d := range warmDurations {
 		warmSum += d
 	}
-	avgWarm := warmSum / float64(len(warmDurations))
-	fmt.Printf("WARM REQUESTS AVERAGE LATENCY (5 samples):  %.2f ms\n", avgWarm)
+	p50Idx := int(math.Min(math.Max(0, math.Floor(n*0.50)), n-1))
+	p95Idx := int(math.Min(math.Max(0, math.Floor(n*0.95)), n-1))
+	p99Idx := int(math.Min(math.Max(0, math.Floor(n*0.99)), n-1))
+
+	minMs := warmDurations[0]
+	maxMs := warmDurations[len(warmDurations)-1]
+	meanMs := warmSum / n
+	p50Ms := warmDurations[p50Idx]
+	p95Ms := warmDurations[p95Idx]
+	p99Ms := warmDurations[p99Idx]
+
 	fmt.Println("-----------------------------------------------------------------------------------------")
-	fmt.Printf("RATIO (Cold / Warm): %.2fx\n", coldMs/avgWarm)
-	if coldMs > avgWarm {
-		fmt.Printf("EMPIRICAL RESULT: Cold (%.2f ms) is SLOWER than Warm (%.2f ms) as expected!\n", coldMs, avgWarm)
-		fmt.Println("Reason: Cold must establish TLS, execute remote registry HEAD, and invoke Cosign verify subprocess.")
-		fmt.Println("        Warm hits in-memory resolver digest cache and verifier report cache, bypassing all I/O.")
+	fmt.Printf("WARM REQUESTS ADMISSION LATENCY (%d samples):\n", warmCount)
+	fmt.Printf("  Min:  %.2f ms\n", minMs)
+	fmt.Printf("  Max:  %.2f ms\n", maxMs)
+	fmt.Printf("  Mean: %.2f ms\n", meanMs)
+	fmt.Printf("  p50:  %.2f ms\n", p50Ms)
+	fmt.Printf("  p95:  %.2f ms\n", p95Ms)
+	fmt.Printf("  p99:  %.2f ms\n", p99Ms)
+	fmt.Println("-----------------------------------------------------------------------------------------")
+	ratio := coldMs / math.Max(p50Ms, 0.001)
+	fmt.Printf("RATIO (Cold / Warm p50): %.2fx\n", ratio)
+	fmt.Println("-----------------------------------------------------------------------------------------")
+	sloMet := p95Ms < 300.0
+	if sloMet {
+		fmt.Printf("SLO VERIFICATION: PASS (Warm p95 of %.2f ms meets the < 300.0 ms SLO threshold)\n", p95Ms)
 	} else {
-		fmt.Printf("Cold is not slower: Cold=%.2fms, Warm=%.2fms\n", coldMs, avgWarm)
+		fmt.Printf("SLO VERIFICATION: FAIL (Warm p95 of %.2f ms exceeds the < 300.0 ms SLO threshold)\n", p95Ms)
 	}
 	fmt.Println("=========================================================================================")
 }

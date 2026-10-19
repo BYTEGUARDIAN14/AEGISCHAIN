@@ -145,9 +145,11 @@ func (r *Resolver) Resolve(ctx context.Context, imageRef string) (string, error)
 		return "", ErrRevoked
 	}
 
-	r.cache[imageRef] = CacheEntry{
-		Digest:    digest,
-		ExpiresAt: time.Now().Add(r.ttl),
+	if r.ttl > 0 {
+		r.cache[imageRef] = CacheEntry{
+			Digest:    digest,
+			ExpiresAt: time.Now().Add(r.ttl),
+		}
 	}
 
 	return digest, nil

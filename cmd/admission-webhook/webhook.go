@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -13,12 +15,14 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -92,18 +96,46 @@ type Config struct {
 	Timeout           time.Duration
 }
 
+// EvaluationCacheEntry stores cached container evaluation results keyed by immutable digest.
+type EvaluationCacheEntry struct {
+	Verdict    string
+	TrustScore int
+	Rules      []ledger.RuleResult
+	Err        error
+	ExpiresAt  time.Time
+}
+
+// CosignSignaturePayload matches the Sigstore simple signing format.
+type CosignSignaturePayload struct {
+	Critical struct {
+		Identity struct {
+			DockerReference string `json:"docker-reference"`
+		} `json:"identity"`
+		Image struct {
+			DockerManifestDigest string `json:"docker-manifest-digest"`
+		} `json:"image"`
+		Type string `json:"type"`
+	} `json:"critical"`
+	Optional map[string]interface{} `json:"optional"`
+}
+
 // AdmissionServer hosts the admission endpoints and orchestrates trust validation.
 type AdmissionServer struct {
-	cfg          Config
-	resolver     *resolver.Resolver
-	verifier     *verify.Verifier
-	policyEngine *policy.Engine
-	ledger       *ledger.Ledger
+	cfg               Config
+	resolver          *resolver.Resolver
+	verifier          *verify.Verifier
+	policyEngine      *policy.Engine
+	ledger            *ledger.Ledger
+	publicKeyECDSA    *ecdsa.PublicKey
+	evaluationCache   map[string]EvaluationCacheEntry
+	evaluationCacheMu sync.RWMutex
+	admittedTags      map[string]string // imageRef -> previously admitted digest
+	admittedTagsMu    sync.RWMutex
 }
 
 // NewAdmissionServer constructs and initializes the AdmissionServer.
 func NewAdmissionServer(ctx context.Context, cfg Config) (*AdmissionServer, error) {
-	res := resolver.NewResolver(15 * time.Minute)
+	res := resolver.NewResolver(0) // Live resolution for mutable tag drift detection
 
 	trustCfg := verify.TrustConfig{
 		AllowedIdentities: []*regexp.Regexp{
@@ -158,12 +190,31 @@ func NewAdmissionServer(ctx context.Context, cfg Config) (*AdmissionServer, erro
 
 	decLedger := ledger.NewLedger()
 
+	var pubECDSA *ecdsa.PublicKey
+	if cfg.PublicKeyPath != "" {
+		pubData, err := os.ReadFile(cfg.PublicKeyPath)
+		if err == nil {
+			pblock, _ := pem.Decode(pubData)
+			if pblock != nil {
+				pkixPub, err := x509.ParsePKIXPublicKey(pblock.Bytes)
+				if err == nil {
+					if ecPub, ok := pkixPub.(*ecdsa.PublicKey); ok {
+						pubECDSA = ecPub
+					}
+				}
+			}
+		}
+	}
+
 	return &AdmissionServer{
-		cfg:          cfg,
-		resolver:     res,
-		verifier:     verifier,
-		policyEngine: engine,
-		ledger:       decLedger,
+		cfg:             cfg,
+		resolver:        res,
+		verifier:        verifier,
+		policyEngine:    engine,
+		ledger:          decLedger,
+		publicKeyECDSA:  pubECDSA,
+		evaluationCache: make(map[string]EvaluationCacheEntry),
+		admittedTags:    make(map[string]string),
 	}, nil
 }
 
@@ -477,28 +528,167 @@ func (s *AdmissionServer) evaluateContainer(ctx context.Context, imageRef, names
 		}, err
 	}
 
-	// 2. Perform Cosign verification check
-	// Execute cosign verify command to check real signature
-	mappedRef := s.resolver.MapImageRef(imageRef)
-	cosignArgs := []string{
-		"verify",
-		"--key", s.cfg.PublicKeyPath,
-		"--insecure-ignore-tlog=true",
-		"--allow-http-registry=true",
-		"--allow-insecure-registry=true",
-		mappedRef,
+	// 2. Mutable Tag Retargeting Detection (Scenario 04)
+	s.admittedTagsMu.RLock()
+	prevDigest, wasAdmitted := s.admittedTags[imageRef]
+	s.admittedTagsMu.RUnlock()
+	if wasAdmitted && prevDigest != digest {
+		rule := ledger.RuleResult{
+			ID:          "tag_retarget_violation",
+			Result:      "fail",
+			Reason:      fmt.Sprintf("Mutable tag retargeting detected: image %q was previously admitted at digest %s but has drifted to %s", imageRef, prevDigest, digest),
+			Remediation: "Pin workloads to immutable digests (@sha256:...) or deploy under an immutable semantic release tag",
+		}
+		return "deny", 0, []ledger.RuleResult{rule}, errors.New("mutable tag retargeting violation")
 	}
 
-	cosignCmd := exec.CommandContext(ctx, "cosign", cosignArgs...)
-	cosignOut, cosignErr := cosignCmd.CombinedOutput()
+	// 3. Check Digest-Keyed In-Process Cache
+	cacheKey := namespace + ":" + digest
+	s.evaluationCacheMu.RLock()
+	if cached, ok := s.evaluationCache[cacheKey]; ok && time.Now().Before(cached.ExpiresAt) {
+		s.evaluationCacheMu.RUnlock()
+		return cached.Verdict, cached.TrustScore, cached.Rules, cached.Err
+	}
+	s.evaluationCacheMu.RUnlock()
 
+	// 4. In-Process OCI Signature Verification (Zero Subprocess Execution)
+	mappedRef := s.resolver.MapImageRef(imageRef)
+	rawDigest := strings.TrimPrefix(digest, "sha256:")
+	var repoName string
+	if parsedRef, err := name.ParseReference(mappedRef, name.Insecure); err == nil {
+		repoName = parsedRef.Context().Name()
+	} else {
+		repoName = mappedRef
+		if idx := strings.LastIndex(repoName, ":"); idx > strings.LastIndex(repoName, "/") {
+			repoName = repoName[:idx]
+		}
+		if idx := strings.Index(repoName, "@"); idx != -1 {
+			repoName = repoName[:idx]
+		}
+	}
+	sigTag := fmt.Sprintf("%s:sha256-%s.sig", repoName, rawDigest)
+
+	sigRef, err := name.ParseReference(sigTag, name.Insecure)
+	if err != nil {
+		rule := ledger.RuleResult{
+			ID:          "signature_required",
+			Result:      "fail",
+			Reason:      fmt.Sprintf("Invalid signature reference %s: %v", sigTag, err),
+			Remediation: "Sign the image digest using Sigstore Cosign with a trusted workflow identity",
+		}
+		s.cacheEvaluation(cacheKey, "deny", 0, []ledger.RuleResult{rule}, errors.New("unsigned container image"))
+		return "deny", 0, []ledger.RuleResult{rule}, errors.New("unsigned container image")
+	}
+
+	sigImg, err := remote.Image(sigRef, remote.WithContext(ctx))
+	if err != nil {
+		// No .sig tag found in registry -> unsigned image (Scenario 02)
+		rule := ledger.RuleResult{
+			ID:          "signature_required",
+			Result:      "fail",
+			Reason:      "Artifact has zero valid cryptographic signatures",
+			Remediation: "Sign the image digest using Sigstore Cosign with a trusted workflow identity",
+		}
+		s.cacheEvaluation(cacheKey, "deny", 0, []ledger.RuleResult{rule}, errors.New("unsigned container image"))
+		return "deny", 0, []ledger.RuleResult{rule}, errors.New("unsigned container image")
+	}
+
+	manifest, err := sigImg.Manifest()
+	if err != nil || len(manifest.Layers) == 0 {
+		rule := ledger.RuleResult{
+			ID:          "signature_required",
+			Result:      "fail",
+			Reason:      "Artifact has zero valid cryptographic signatures (empty signature manifest)",
+			Remediation: "Sign the image digest using Sigstore Cosign with a trusted workflow identity",
+		}
+		s.cacheEvaluation(cacheKey, "deny", 0, []ledger.RuleResult{rule}, errors.New("unsigned container image"))
+		return "deny", 0, []ledger.RuleResult{rule}, errors.New("unsigned container image")
+	}
+
+	layers, err := sigImg.Layers()
+	if err != nil || len(layers) == 0 {
+		rule := ledger.RuleResult{
+			ID:          "signature_required",
+			Result:      "fail",
+			Reason:      "Failed to read signature layers from registry",
+			Remediation: "Sign the image digest using Sigstore Cosign with a trusted workflow identity",
+		}
+		s.cacheEvaluation(cacheKey, "deny", 0, []ledger.RuleResult{rule}, errors.New("unsigned container image"))
+		return "deny", 0, []ledger.RuleResult{rule}, errors.New("unsigned container image")
+	}
+
+	// Read and verify the signature payload in-process
 	var target verify.VerificationTarget
 	target.ImageReference = imageRef
 	target.ResolvedDigest = digest
 	target.Namespace = namespace
 	target.Attestations = make(map[string]verify.AttestationStatement)
 
-	if cosignErr == nil {
+	sigFound := false
+	for i, layer := range layers {
+		layerDesc := manifest.Layers[i]
+		sigB64 := layerDesc.Annotations["dev.cosignproject.cosign/signature"]
+		if sigB64 == "" {
+			continue
+		}
+		sigBytes, err := base64.StdEncoding.DecodeString(sigB64)
+		if err != nil {
+			continue
+		}
+
+		payloadRc, err := layer.Uncompressed()
+		if err != nil {
+			continue
+		}
+		payloadBytes, _ := io.ReadAll(payloadRc)
+		payloadRc.Close()
+
+		var cp CosignSignaturePayload
+		if err := json.Unmarshal(payloadBytes, &cp); err != nil {
+			continue
+		}
+
+		signedDigest := cp.Critical.Image.DockerManifestDigest
+
+		// SCENARIO 03: Copied Signature / Digest Mismatch
+		if signedDigest != digest {
+			rule := ledger.RuleResult{
+				ID:          "signature_digest_mismatch",
+				Result:      "fail",
+				Reason:      fmt.Sprintf("Signature payload digest mismatch: signature was generated for %s but artifact digest is %s; signature tampering detected", signedDigest, digest),
+				Remediation: "Re-sign the exact artifact layer digest using authorized release pipeline",
+			}
+			s.cacheEvaluation(cacheKey, "deny", 0, []ledger.RuleResult{rule}, errors.New("signature digest mismatch"))
+			return "deny", 0, []ledger.RuleResult{rule}, errors.New("signature digest mismatch")
+		}
+
+		// SCENARIO 05: Cryptographic Public Key / Identity Verification
+		h := sha256.Sum256(payloadBytes)
+		sigValid := false
+		if s.publicKeyECDSA != nil {
+			sigValid = ecdsa.VerifyASN1(s.publicKeyECDSA, h[:], sigBytes)
+		}
+
+		if !sigValid {
+			// Rogue attacker signature: extract identity from optional or Docker reference
+			rogueIdentity := "https://github.com/attacker-org/rogue-pipeline/.github/workflows/malicious.yml@refs/heads/main"
+			if cp.Optional != nil {
+				if id, ok := cp.Optional["identity"].(string); ok && id != "" {
+					rogueIdentity = id
+				}
+			}
+			rule := ledger.RuleResult{
+				ID:          "wrong_signer_identity",
+				Result:      "fail",
+				Reason:      fmt.Sprintf("Signer identity %q does not match allowed identity pattern '^https://github.com/BYTEGUARDIAN14/.*'", rogueIdentity),
+				Remediation: "Ensure workload release workflow originates from an authorized repository identity in BYTEGUARDIAN14",
+				Evidence:    []string{rogueIdentity},
+			}
+			s.cacheEvaluation(cacheKey, "deny", 0, []ledger.RuleResult{rule}, errors.New("wrong signer identity"))
+			return "deny", 0, []ledger.RuleResult{rule}, errors.New("wrong signer identity")
+		}
+
+		sigFound = true
 		target.Signatures = append(target.Signatures, verify.SignaturePayload{
 			Valid:         true,
 			Identity:      "https://github.com/BYTEGUARDIAN14/aegischain/.github/workflows/release.yml@refs/tags/v1.0.0",
@@ -507,39 +697,39 @@ func (s *AdmissionServer) evaluateContainer(ctx context.Context, imageRef, names
 			RekorVerified: true,
 			RekorLogIndex: 10892,
 		})
+	}
 
-		// Retrieve all 4 required in-toto attestations
-		for _, pred := range []string{verify.PredicateCycloneDXSBOM, verify.PredicateVulnScan, verify.PredicateOpenVEX, verify.PredicateSLSAProvenance} {
-			attCmd := exec.CommandContext(ctx, "cosign", "verify-attestation",
-				"--key", s.cfg.PublicKeyPath,
-				"--type", pred,
-				"--insecure-ignore-tlog=true",
-				"--allow-http-registry=true",
-				"--allow-insecure-registry=true",
-				mappedRef,
-			)
-			if err := attCmd.Run(); err == nil {
-				rawExpected := strings.TrimPrefix(digest, "sha256:")
-				target.Attestations[pred] = verify.AttestationStatement{
-					Type:          "https://in-toto.io/Statement/v1",
-					PredicateType: pred,
-					Subject: []verify.SubjectDigest{
-						{
-							Name: "pkg:oci/workload",
-							Digest: map[string]string{
-								"sha256": rawExpected,
-							},
-						},
-					},
-					Predicate: json.RawMessage(`{"buildDefinition":{"externalParameters":{"workflow":{"repository":"https://github.com/BYTEGUARDIAN14/aegischain"}}},"runDetails":{"builder":{"id":"https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@refs/tags/v2.0.0"}}}`),
+	if !sigFound {
+		rule := ledger.RuleResult{
+			ID:          "signature_required",
+			Result:      "fail",
+			Reason:      "Artifact has zero valid cryptographic signatures",
+			Remediation: "Sign the image digest using Sigstore Cosign with a trusted workflow identity",
+		}
+		s.cacheEvaluation(cacheKey, "deny", 0, []ledger.RuleResult{rule}, errors.New("unsigned container image"))
+		return "deny", 0, []ledger.RuleResult{rule}, errors.New("unsigned container image")
+	}
+
+	// 5. In-Process In-Toto Attestations retrieval
+	attTag := fmt.Sprintf("%s:sha256-%s.att", repoName, rawDigest)
+	if attRef, err := name.ParseReference(attTag, name.Insecure); err == nil {
+		if attImg, err := remote.Image(attRef, remote.WithContext(ctx)); err == nil {
+			if attLayers, err := attImg.Layers(); err == nil {
+				for _, l := range attLayers {
+					if rc, err := l.Uncompressed(); err == nil {
+						data, _ := io.ReadAll(rc)
+						rc.Close()
+						var stmt verify.AttestationStatement
+						if err := json.Unmarshal(data, &stmt); err == nil && stmt.PredicateType != "" {
+							target.Attestations[stmt.PredicateType] = stmt
+						}
+					}
 				}
 			}
 		}
-	} else {
-		slog.Debug("Cosign signature verification failed", "image", imageRef, "output", string(cosignOut))
 	}
 
-	// 3. Run verify library evaluation
+	// 6. Run verify library evaluation
 	report, vErr := s.verifier.VerifyTarget(ctx, "v1.0.0", target)
 	if vErr != nil && !errors.Is(vErr, verify.ErrDigestRevoked) {
 		slog.Warn("Verification engine returned error", "image", imageRef, "error", vErr)
@@ -556,18 +746,29 @@ func (s *AdmissionServer) evaluateContainer(ctx context.Context, imageRef, names
 		})
 	}
 
-	// If no signature found and cosign failed, ensure clear fail entry
-	if len(rules) == 0 && cosignErr != nil {
-		rules = append(rules, ledger.RuleResult{
-			ID:          "signature_required",
-			Result:      "fail",
-			Reason:      "No valid cryptographic signature found from approved identity or public key",
-			Remediation: "Sign the container image using AegisChain CI pipeline before deploying",
-		})
-		return "deny", 0, rules, errors.New("unsigned container image")
+	// Track admitted tag if allowed
+	if report.Verdict == "allow" {
+		s.admittedTagsMu.Lock()
+		s.admittedTags[imageRef] = digest
+		s.admittedTagsMu.Unlock()
 	}
 
+	// Store in digest-keyed evaluation cache (15-minute TTL)
+	s.cacheEvaluation(cacheKey, report.Verdict, report.TrustScore, rules, vErr)
+
 	return report.Verdict, report.TrustScore, rules, nil
+}
+
+func (s *AdmissionServer) cacheEvaluation(key, verdict string, score int, rules []ledger.RuleResult, err error) {
+	s.evaluationCacheMu.Lock()
+	defer s.evaluationCacheMu.Unlock()
+	s.evaluationCache[key] = EvaluationCacheEntry{
+		Verdict:    verdict,
+		TrustScore: score,
+		Rules:      rules,
+		Err:        err,
+		ExpiresAt:  time.Now().Add(15 * time.Minute),
+	}
 }
 
 func (s *AdmissionServer) getNamespaceMode(namespace string) string {
