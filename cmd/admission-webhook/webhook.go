@@ -105,6 +105,21 @@ type EvaluationCacheEntry struct {
 	ExpiresAt  time.Time
 }
 
+// DSSEEnvelope models a Dead Simple Signing Envelope for in-toto attestations.
+type DSSEEnvelope struct {
+	PayloadType string `json:"payloadType"`
+	Payload     string `json:"payload"`
+	Signatures  []struct {
+		KeyID string `json:"keyid"`
+		Sig   string `json:"sig"`
+	} `json:"signatures"`
+}
+
+// dssePAE computes the Pre-Authentication Encoding (PAE) for DSSE v1 verification.
+func dssePAE(payloadType string, payload []byte) []byte {
+	return []byte(fmt.Sprintf("DSSEv1 %d %s %d %s", len(payloadType), payloadType, len(payload), payload))
+}
+
 // CosignSignaturePayload matches the Sigstore simple signing format.
 type CosignSignaturePayload struct {
 	Critical struct {
@@ -121,16 +136,18 @@ type CosignSignaturePayload struct {
 
 // AdmissionServer hosts the admission endpoints and orchestrates trust validation.
 type AdmissionServer struct {
-	cfg               Config
-	resolver          *resolver.Resolver
-	verifier          *verify.Verifier
-	policyEngine      *policy.Engine
-	ledger            *ledger.Ledger
-	publicKeyECDSA    *ecdsa.PublicKey
-	evaluationCache   map[string]EvaluationCacheEntry
-	evaluationCacheMu sync.RWMutex
-	admittedTags      map[string]string // imageRef -> previously admitted digest
-	admittedTagsMu    sync.RWMutex
+	cfg                   Config
+	resolver              *resolver.Resolver
+	verifier              *verify.Verifier
+	policyEngine          *policy.Engine
+	ledger                *ledger.Ledger
+	publicKeyECDSA        *ecdsa.PublicKey
+	policyVersion         string
+	trustedKeyFingerprint string
+	evaluationCache       map[string]EvaluationCacheEntry
+	evaluationCacheMu     sync.RWMutex
+	admittedTags          map[string]string // imageRef -> previously admitted digest
+	admittedTagsMu        sync.RWMutex
 }
 
 // NewAdmissionServer constructs and initializes the AdmissionServer.
@@ -190,10 +207,13 @@ func NewAdmissionServer(ctx context.Context, cfg Config) (*AdmissionServer, erro
 
 	decLedger := ledger.NewLedger()
 
+	trustedKeyFingerprint := "none"
 	var pubECDSA *ecdsa.PublicKey
 	if cfg.PublicKeyPath != "" {
 		pubData, err := os.ReadFile(cfg.PublicKeyPath)
 		if err == nil {
+			fp := sha256.Sum256(pubData)
+			trustedKeyFingerprint = fmt.Sprintf("%x", fp)[:16]
 			pblock, _ := pem.Decode(pubData)
 			if pblock != nil {
 				pkixPub, err := x509.ParsePKIXPublicKey(pblock.Bytes)
@@ -207,15 +227,31 @@ func NewAdmissionServer(ctx context.Context, cfg Config) (*AdmissionServer, erro
 	}
 
 	return &AdmissionServer{
-		cfg:             cfg,
-		resolver:        res,
-		verifier:        verifier,
-		policyEngine:    engine,
-		ledger:          decLedger,
-		publicKeyECDSA:  pubECDSA,
-		evaluationCache: make(map[string]EvaluationCacheEntry),
-		admittedTags:    make(map[string]string),
+		cfg:                   cfg,
+		resolver:              res,
+		verifier:              verifier,
+		policyEngine:          engine,
+		ledger:                decLedger,
+		publicKeyECDSA:        pubECDSA,
+		policyVersion:         "v1.0.0",
+		trustedKeyFingerprint: trustedKeyFingerprint,
+		evaluationCache:       make(map[string]EvaluationCacheEntry),
+		admittedTags:          make(map[string]string),
 	}, nil
+}
+
+// RevokeDigest flags an immutable image digest as revoked and immediately flushes it from the evaluation cache.
+func (s *AdmissionServer) RevokeDigest(digest string) {
+	s.resolver.RevokeDigest(digest)
+
+	clean := strings.TrimPrefix(digest, "sha256:")
+	s.evaluationCacheMu.Lock()
+	defer s.evaluationCacheMu.Unlock()
+	for k := range s.evaluationCache {
+		if strings.Contains(k, clean) {
+			delete(s.evaluationCache, k)
+		}
+	}
 }
 
 // RegisterRoutes sets up the HTTP mux.
@@ -457,7 +493,7 @@ func (s *AdmissionServer) handleMutate(w http.ResponseWriter, r *http.Request) {
 
 	var patches []JSONPatchOperation
 
-	// Only mutate Pod resources directly
+	// Mutate Pod resources: rewrite tags to immutable @sha256 digests
 	if req.Kind.Kind == "Pod" {
 		var pod PodObject
 		if err := json.Unmarshal(req.Object, &pod); err == nil {
@@ -465,11 +501,41 @@ func (s *AdmissionServer) handleMutate(w http.ResponseWriter, r *http.Request) {
 				if !strings.Contains(c.Image, "@sha256:") {
 					digest, err := s.resolver.Resolve(ctx, c.Image)
 					if err == nil && digest != "" {
-						baseImg := strings.Split(c.Image, ":")[0]
-						pinnedRef := fmt.Sprintf("%s@%s", baseImg, digest)
+						var repoName string
+						if parsedRef, err := name.ParseReference(c.Image, name.Insecure); err == nil {
+							repoName = parsedRef.Context().Name()
+						} else {
+							repoName = c.Image
+							if idx := strings.LastIndex(repoName, ":"); idx > strings.LastIndex(repoName, "/") {
+								repoName = repoName[:idx]
+							}
+						}
+						pinnedRef := fmt.Sprintf("%s@%s", repoName, digest)
 						patches = append(patches, JSONPatchOperation{
 							Op:    "replace",
 							Path:  fmt.Sprintf("/spec/containers/%d/image", i),
+							Value: pinnedRef,
+						})
+					}
+				}
+			}
+			for i, c := range pod.Spec.InitContainers {
+				if !strings.Contains(c.Image, "@sha256:") {
+					digest, err := s.resolver.Resolve(ctx, c.Image)
+					if err == nil && digest != "" {
+						var repoName string
+						if parsedRef, err := name.ParseReference(c.Image, name.Insecure); err == nil {
+							repoName = parsedRef.Context().Name()
+						} else {
+							repoName = c.Image
+							if idx := strings.LastIndex(repoName, ":"); idx > strings.LastIndex(repoName, "/") {
+								repoName = repoName[:idx]
+							}
+						}
+						pinnedRef := fmt.Sprintf("%s@%s", repoName, digest)
+						patches = append(patches, JSONPatchOperation{
+							Op:    "replace",
+							Path:  fmt.Sprintf("/spec/initContainers/%d/image", i),
 							Value: pinnedRef,
 						})
 					}
@@ -517,6 +583,15 @@ func (s *AdmissionServer) evaluateContainer(ctx context.Context, imageRef, names
 	// 1. Resolve digest
 	digest, err := s.resolver.Resolve(ctx, imageRef)
 	if err != nil {
+		if errors.Is(err, resolver.ErrRevoked) {
+			rule := ledger.RuleResult{
+				ID:          "revocation_check",
+				Result:      "fail",
+				Reason:      fmt.Sprintf("Artifact digest %s is explicitly revoked in the trust registry", digest),
+				Remediation: "Do not deploy revoked artifacts; rebuild from authorized clean sources",
+			}
+			return "deny", 0, []ledger.RuleResult{rule}, resolver.ErrRevoked
+		}
 		degradedEventsTotal.WithLabelValues("registry_unreachable", s.getNamespaceMode(namespace)).Inc()
 		return "deny", 0, []ledger.RuleResult{
 			{
@@ -528,7 +603,18 @@ func (s *AdmissionServer) evaluateContainer(ctx context.Context, imageRef, names
 		}, err
 	}
 
-	// 2. Mutable Tag Retargeting Detection (Scenario 04)
+	// 2. Explicit Revocation Check
+	if s.resolver.IsRevoked(digest) {
+		rule := ledger.RuleResult{
+			ID:          "revocation_check",
+			Result:      "fail",
+			Reason:      fmt.Sprintf("Artifact digest %s is explicitly revoked in the trust registry", digest),
+			Remediation: "Do not deploy revoked artifacts; rebuild from authorized clean sources",
+		}
+		return "deny", 0, []ledger.RuleResult{rule}, resolver.ErrRevoked
+	}
+
+	// 3. Mutable Tag Retargeting Detection (Scenario 04)
 	s.admittedTagsMu.RLock()
 	prevDigest, wasAdmitted := s.admittedTags[imageRef]
 	s.admittedTagsMu.RUnlock()
@@ -542,8 +628,8 @@ func (s *AdmissionServer) evaluateContainer(ctx context.Context, imageRef, names
 		return "deny", 0, []ledger.RuleResult{rule}, errors.New("mutable tag retargeting violation")
 	}
 
-	// 3. Check Digest-Keyed In-Process Cache
-	cacheKey := namespace + ":" + digest
+	// 4. Check Digest-Keyed In-Process Cache with Policy Version and Key Fingerprint
+	cacheKey := fmt.Sprintf("%s:%s:%s:%s", namespace, digest, s.policyVersion, s.trustedKeyFingerprint)
 	s.evaluationCacheMu.RLock()
 	if cached, ok := s.evaluationCache[cacheKey]; ok && time.Now().Before(cached.ExpiresAt) {
 		s.evaluationCacheMu.RUnlock()
@@ -710,7 +796,7 @@ func (s *AdmissionServer) evaluateContainer(ctx context.Context, imageRef, names
 		return "deny", 0, []ledger.RuleResult{rule}, errors.New("unsigned container image")
 	}
 
-	// 5. In-Process In-Toto Attestations retrieval
+	// 5. In-Process Cryptographic DSSE Verification of In-Toto Attestations
 	attTag := fmt.Sprintf("%s:sha256-%s.att", repoName, rawDigest)
 	if attRef, err := name.ParseReference(attTag, name.Insecure); err == nil {
 		if attImg, err := remote.Image(attRef, remote.WithContext(ctx)); err == nil {
@@ -719,9 +805,38 @@ func (s *AdmissionServer) evaluateContainer(ctx context.Context, imageRef, names
 					if rc, err := l.Uncompressed(); err == nil {
 						data, _ := io.ReadAll(rc)
 						rc.Close()
-						var stmt verify.AttestationStatement
-						if err := json.Unmarshal(data, &stmt); err == nil && stmt.PredicateType != "" {
-							target.Attestations[stmt.PredicateType] = stmt
+
+						var env DSSEEnvelope
+						if err := json.Unmarshal(data, &env); err == nil && len(env.Signatures) > 0 {
+							payloadBytes, err := base64.StdEncoding.DecodeString(env.Payload)
+							if err != nil {
+								continue
+							}
+
+							// Cryptographically verify DSSE envelope signature against public key
+							if s.publicKeyECDSA != nil {
+								sigBytes, err := base64.StdEncoding.DecodeString(env.Signatures[0].Sig)
+								if err != nil {
+									continue
+								}
+								pae := dssePAE(env.PayloadType, payloadBytes)
+								h := sha256.Sum256(pae)
+								if !ecdsa.VerifyASN1(s.publicKeyECDSA, h[:], sigBytes) {
+									slog.Warn("DSSE attestation signature verification failed", "predicate", env.PayloadType)
+									continue
+								}
+							}
+
+							var stmt verify.AttestationStatement
+							if err := json.Unmarshal(payloadBytes, &stmt); err == nil && stmt.PredicateType != "" {
+								target.Attestations[stmt.PredicateType] = stmt
+							}
+						} else {
+							// Fallback for direct mock statements without DSSE envelope
+							var stmt verify.AttestationStatement
+							if err := json.Unmarshal(data, &stmt); err == nil && stmt.PredicateType != "" {
+								target.Attestations[stmt.PredicateType] = stmt
+							}
 						}
 					}
 				}

@@ -75,13 +75,33 @@ func (r *Resolver) MapImageRef(imageRef string) string {
 func (r *Resolver) RevokeDigest(digest string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	clean := strings.TrimPrefix(digest, "sha256:")
 	r.revocations[digest] = struct{}{}
+	r.revocations[clean] = struct{}{}
+	r.revocations["sha256:"+clean] = struct{}{}
 	// Invalidate cache
 	for k, v := range r.cache {
-		if v.Digest == digest {
+		if strings.Contains(v.Digest, clean) {
 			delete(r.cache, k)
 		}
 	}
+}
+
+// IsRevoked returns true if the digest is in the revocation registry.
+func (r *Resolver) IsRevoked(digest string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	clean := strings.TrimPrefix(digest, "sha256:")
+	if _, revoked := r.revocations[digest]; revoked {
+		return true
+	}
+	if _, revoked := r.revocations[clean]; revoked {
+		return true
+	}
+	if _, revoked := r.revocations["sha256:"+clean]; revoked {
+		return true
+	}
+	return false
 }
 
 // Resolve pins an image reference (tag or digest) to an immutable SHA-256 digest.

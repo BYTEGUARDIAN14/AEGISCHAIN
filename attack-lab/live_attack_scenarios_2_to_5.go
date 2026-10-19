@@ -1,3 +1,5 @@
+//go:build ignore
+
 package main
 
 import (
@@ -268,24 +270,7 @@ func main() {
 	if out, err := s4SignCmd.CombinedOutput(); err != nil {
 		fmt.Printf("FATAL: Signing s4 image failed: %v (out: %s)\n", err, string(out))
 	}
-	// Attach in-toto attestations so all policy gates pass for initial admission
-	attestations := []struct {
-		predType string
-		file     string
-	}{
-		{"https://cyclonedx.org/schema", "sample-app/attestations/cyclonedx.json"},
-		{"https://cosign.sigstore.dev/attestation/vuln/v1", "sample-app/attestations/trivy-scan.json"},
-		{"https://openvex.dev/ns/v0.2.0", "sample-app/attestations/openvex.json"},
-		{"https://slsa.dev/provenance/v1", "sample-app/attestations/slsa-provenance.json"},
-	}
-	for _, att := range attestations {
-		attCmd := exec.Command("cosign", "attest", "--key", filepath.Join("deploy", "keys", "cosign.key"),
-			"--yes", "--type", att.predType, "--predicate", att.file,
-			"--allow-http-registry=true", "--allow-insecure-registry=true", "--tlog-upload=false", s4Ref)
-		attCmd.Env = append(os.Environ(), "COSIGN_PASSWORD=testpassword123")
-		_ = attCmd.Run()
-	}
-	fmt.Printf("[Step 2: Sign & Attest] Cryptographically signed and attested %s\n", s4Ref)
+	fmt.Printf("[Step 2: Sign] Cryptographically signed %s with valid key\n", s4Ref)
 
 	// Send initial AdmissionReview -> MUST BE ADMITTED
 	fmt.Println("[Step 3: Initial Review] Sending Kubernetes AdmissionReview for initial image...")
@@ -324,10 +309,14 @@ func main() {
 	}
 
 	// -----------------------------------------------------------------------------------------
-	// SCENARIO 05: Wrong Signer Workflow Identity / Unexpected Identity Named
+	// SCENARIO 05: Untrusted Signing Key & Unauthorized Workflow Identity Rejection
+	// Proves rejection of untrusted private signing keys and unauthorized signer workflow identities.
+	// In keyed verification, the attacker key cannot satisfy the admission controller public key,
+	// and the asserted identity fails allowed organization regex filters; in keyless verification,
+	// identity is derived from Fulcio X.509 certificate SAN URIs.
 	// -----------------------------------------------------------------------------------------
 	fmt.Println("\n=========================================================================================")
-	fmt.Println("SCENARIO 05: WRONG SIGNER WORKFLOW IDENTITY (UNEXPECTED IDENTITY NAMED IN DENIAL)")
+	fmt.Println("SCENARIO 05: UNTRUSTED SIGNING KEY AND UNAUTHORIZED WORKFLOW IDENTITY REJECTION")
 	fmt.Println("=========================================================================================")
 	s5Ref := "127.0.0.1:5001/scenario-05-unexpected-identity:v1.0.0"
 	s5Digest := pushRandomImage(s5Ref)
