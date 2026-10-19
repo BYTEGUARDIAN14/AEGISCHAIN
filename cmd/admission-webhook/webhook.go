@@ -72,6 +72,7 @@ var (
 		},
 		[]string{"reason", "mode"},
 	)
+	allowedIdentityRegex = regexp.MustCompile(`^https://github\.com/BYTEGUARDIAN14/.*`)
 )
 
 func init() {
@@ -796,7 +797,7 @@ func (s *AdmissionServer) evaluateContainer(ctx context.Context, imageRef, names
 			}
 		} else {
 			// Keyless mode: verify identity from OIDC claims
-			matched, _ := regexp.MatchString(`^https://github\.com/BYTEGUARDIAN14/.*`, identity)
+			matched := allowedIdentityRegex.MatchString(identity)
 			if !matched {
 				rule := ledger.RuleResult{
 					ID:          "wrong_signer_identity",
